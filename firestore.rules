@@ -1,0 +1,100 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'nkae.rjb@gmail.com' ||
+        (
+          exists(/databases/$(database)/documents/adminUsers/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.role == 'admin' &&
+          get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.active == true
+        )
+      );
+    }
+
+    // Admin Users Collection
+    match /adminUsers/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Products Collection
+    match /products/{productId} {
+      // Public read for customer storefront
+      allow read: if true;
+      // ONLY authenticated and authorized active admins can modify products
+      allow create, update: if isAdmin()
+        && isValidId(productId)
+        && request.resource.data.productId is string
+        && request.resource.data.sellingPrice is number;
+      allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    // Finance Enquiries Collection (0% Interest Finance)
+    match /financeEnquiries/{enquiryId} {
+      // Browsing/listing all records is strictly restricted to authorized administrators
+      allow list: if isAdmin();
+      // Single enquiry lookup allowed by ID or admin; client verification checks phone before displaying details
+      allow get: if isAdmin() || isValidId(enquiryId);
+      // Public customer can submit an enquiry for eligible appliances (>= 30,000 NPR)
+      allow create: if isValidId(enquiryId)
+        && request.resource.data.enquiryId == enquiryId
+        && request.resource.data.fullName is string
+        && request.resource.data.phoneNumber is string
+        && request.resource.data.email is string
+        && request.resource.data.citizenshipNumber is string
+        && request.resource.data.productId is string
+        && request.resource.data.productPrice is number
+        && request.resource.data.productPrice >= 30000
+        && request.resource.data.status == 'New';
+      // Only administrators can update status or delete
+      allow update, delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isValidId(orderId);
+      allow create: if isValidId(orderId) 
+        && request.resource.data.id is string
+        && request.resource.data.total is number;
+      allow update, delete: if isAdmin();
+    }
+
+    match /serviceTickets/{ticketId} {
+      allow read: if isValidId(ticketId);
+      allow create: if isValidId(ticketId)
+        && request.resource.data.id is string
+        && request.resource.data.phone is string;
+      allow update, delete: if isAdmin();
+    }
+
+    match /exchangeRequests/{requestId} {
+      allow read: if isValidId(requestId);
+      allow create: if isValidId(requestId)
+        && request.resource.data.id is string
+        && request.resource.data.phone is string;
+      allow update, delete: if isAdmin();
+    }
+
+    match /financeApplications/{applicationId} {
+      allow read: if isValidId(applicationId);
+      allow create: if isValidId(applicationId)
+        && request.resource.data.id is string
+        && request.resource.data.citizenshipNo is string;
+      allow update, delete: if isAdmin();
+    }
+
+    // Default deny all other paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "OmniHome - Smart Appliances & AI Concierge",
+  "description": "Explore, compare, and shop premium smart home appliances with an integrated RAG-powered voice & chat AI concierge, live order tracking, and subscription care hub.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

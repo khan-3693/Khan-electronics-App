@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <g fill="none" fill-rule="evenodd">
+    <!-- 'K' Vertical Stem -->
+    <rect x="72" y="80" width="56" height="352" rx="14" fill="#0F2642" />
+    
+    <!-- 'K' Diagonals and 'H' Integration -->
+    <path d="M128 276 L260 100 C268 89 285 89 293 100 L320 136 C328 147 326 162 315 171 L210 260 L325 352 C336 361 338 376 330 387 L303 423 C295 434 278 434 270 423 L128 276 Z" fill="#E11D48" />
+    
+    <!-- 'H' Right Vertical Stem -->
+    <rect x="384" y="80" width="56" height="352" rx="14" fill="#0F2642" />
+    
+    <!-- 'H' Crossbar linking to center -->
+    <rect x="230" y="232" width="170" height="48" rx="10" fill="#0F2642" />
+  </g>
+</svg>

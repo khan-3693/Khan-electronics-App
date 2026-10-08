@@ -1,0 +1,180 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Showroom home appliance in the Khan Electronics product catalogue",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "maxLength": 128 },
+        "brand": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 100 },
+        "productName": { "type": "string", "maxLength": 250 },
+        "modelNumber": { "type": "string", "maxLength": 100 },
+        "shortDescription": { "type": "string", "maxLength": 1000 },
+        "keySpecification": { "type": "string", "maxLength": 500 },
+        "mrp": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "discountPercent": { "type": "number" },
+        "stockQuantity": { "type": "number" },
+        "stockStatus": { "type": "string", "maxLength": 50 },
+        "financeAvailable": { "type": "boolean" },
+        "exchangeAvailable": { "type": "boolean" },
+        "minimumDownPaymentPercent": { "type": "number" },
+        "warranty": { "type": "string", "maxLength": 500 },
+        "delivery": { "type": "string", "maxLength": 500 },
+        "installation": { "type": "string", "maxLength": 500 },
+        "productStatus": { "type": "string", "maxLength": 50 },
+        "featured": { "type": "boolean" },
+        "specifications": { "type": "object", "description": "Extended specifications map (capacity, power, dimensions, etc.)" },
+        "images": { "type": "array", "description": "Product gallery image URLs" },
+        "videos": { "type": "array", "description": "Product video URLs or demo clips" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "productId",
+        "brand",
+        "category",
+        "productName",
+        "modelNumber",
+        "mrp",
+        "sellingPrice",
+        "stockQuantity",
+        "stockStatus",
+        "financeAvailable",
+        "exchangeAvailable"
+      ]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer appliance order placed at Khan Electronics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "total": { "type": "number" },
+        "status": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "customerName", "phone", "total", "status"]
+    },
+    "ServiceTicket": {
+      "title": "ServiceTicket",
+      "description": "Appliance repair and service ticket registered at Khan Electronics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "applianceType": { "type": "string", "maxLength": 100 },
+        "brand": { "type": "string", "maxLength": 100 },
+        "issueDescription": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "customerName", "phone", "applianceType", "brand", "issueDescription", "status"]
+    },
+    "ExchangeRequest": {
+      "title": "ExchangeRequest",
+      "description": "Samsung Smart Exchange trade-in valuation request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "applianceType": { "type": "string", "maxLength": 100 },
+        "currentBrand": { "type": "string", "maxLength": 100 },
+        "estimatedValuation": { "type": "number" },
+        "status": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "customerName", "phone", "applianceType", "currentBrand", "estimatedValuation", "status"]
+    },
+    "FinanceApplication": {
+      "title": "FinanceApplication",
+      "description": "Hulas Finance pre-approval application",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "citizenshipNo": { "type": "string", "maxLength": 100 },
+        "productName": { "type": "string", "maxLength": 200 },
+        "productPrice": { "type": "number" },
+        "downPaymentAmount": { "type": "number" },
+        "loanAmount": { "type": "number" },
+        "monthlyEmi": { "type": "number" },
+        "status": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "customerName", "phone", "citizenshipNo", "productPrice", "downPaymentAmount", "loanAmount", "monthlyEmi", "status"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized administrator user account for Khan Electronics",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "active"]
+    },
+    "FinanceEnquiry": {
+      "title": "FinanceEnquiry",
+      "description": "Customer 0% interest finance eligibility enquiry",
+      "type": "object",
+      "properties": {
+        "enquiryId": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 200 },
+        "phoneNumber": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 200 },
+        "citizenshipNumber": { "type": "string", "maxLength": 100 },
+        "citizenshipIssueDate": { "type": "string", "maxLength": 50 },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 250 },
+        "modelNumber": { "type": "string", "maxLength": 100 },
+        "productPrice": { "type": "number" },
+        "tenureMonths": { "type": "number" },
+        "status": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["enquiryId", "fullName", "phoneNumber", "email", "citizenshipNumber", "citizenshipIssueDate", "productId", "productPrice", "tenureMonths", "status"]
+    }
+  },
+  "firestore": {
+    "/financeEnquiries/{enquiryId}": {
+      "schema": "FinanceEnquiry",
+      "description": "Finance eligibility enquiry submissions"
+    },
+    "/adminUsers/{userId}": {
+      "schema": "AdminUser",
+      "description": "Authorized administrators collection"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Showroom product catalogue collection"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer purchase orders"
+    },
+    "/serviceTickets/{ticketId}": {
+      "schema": "ServiceTicket",
+      "description": "Appliance service and repair tickets"
+    },
+    "/exchangeRequests/{requestId}": {
+      "schema": "ExchangeRequest",
+      "description": "Samsung exchange valuation requests"
+    },
+    "/financeApplications/{applicationId}": {
+      "schema": "FinanceApplication",
+      "description": "Hulas Finance pre-approval applications"
+    }
+  }
+}

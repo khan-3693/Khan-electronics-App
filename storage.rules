@@ -1,0 +1,32 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'nkae.rjb@gmail.com'
+      );
+    }
+
+    // Product images stored at /products/{productId}/{fileName}
+    match /products/{productId}/{fileName} {
+      // Public customer storefront can read product images
+      allow read: if true;
+      // Only authenticated and authorized active admin can upload/replace
+      allow write: if isAdmin()
+        && request.resource.size < 10 * 1024 * 1024 // 10MB maximum
+        && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
+      // Only authenticated and authorized active admin can delete
+      allow delete: if isAdmin();
+    }
+
+    // Default deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
