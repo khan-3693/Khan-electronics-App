@@ -14,10 +14,12 @@ import {
   HelpCircle,
   Menu,
   X,
-  Bot
+  Bot,
+  Truck
 } from 'lucide-react';
-import { ApplianceCategory } from '../types';
+import { ApplianceCategory, CustomerProfile } from '../types';
 import { KhanLogo } from './KhanLogo';
+import { User as FirebaseUser } from 'firebase/auth';
 
 interface NavbarProps {
   activeView: 'home' | 'catalog' | 'exchange' | 'finance' | 'service' | 'support' | 'dashboard' | 'admin';
@@ -32,11 +34,15 @@ interface NavbarProps {
   onOpenCompare: () => void;
   onOpenAccount: () => void;
   onOpenAiAssistant: () => void;
+  onOpenOrderTracking?: () => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   firestoreProductCount?: number;
   onOpenFirestoreStatus?: () => void;
   onOpenAdmin?: () => void;
+  customerUser?: FirebaseUser | null;
+  customerProfile?: CustomerProfile | null;
+  isCustomerAuthLoading?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -52,11 +58,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCompare,
   onOpenAccount,
   onOpenAiAssistant,
+  onOpenOrderTracking,
   searchQuery,
   setSearchQuery,
   firestoreProductCount,
   onOpenFirestoreStatus,
-  onOpenAdmin
+  onOpenAdmin,
+  customerUser,
+  customerProfile,
+  isCustomerAuthLoading
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -101,6 +111,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="flex items-center gap-3 text-[11px]">
+            {onOpenOrderTracking && (
+              <button
+                onClick={onOpenOrderTracking}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 transition-colors font-semibold shadow-2xs cursor-pointer"
+                title="Track appliance order by reference and phone"
+              >
+                <Truck className="w-3 h-3 text-amber-600" />
+                <span>Track Order</span>
+              </button>
+            )}
             {firestoreProductCount !== undefined && firestoreProductCount > 0 && onOpenFirestoreStatus && (
               <button
                 onClick={onOpenFirestoreStatus}
@@ -274,10 +294,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* User Account / Dashboard */}
           <button
             onClick={onOpenAccount}
-            title="Customer Account & Service Records"
-            className="p-2.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-amber-700 rounded-xl text-xs transition-colors shadow-xs"
+            title={customerUser ? `Signed in as ${customerProfile?.fullName || customerUser.email}` : "Customer Sign In / Account Portal"}
+            className="flex items-center gap-1.5 p-2 bg-white border border-slate-200 hover:border-amber-400 text-slate-700 hover:text-amber-800 rounded-xl text-xs transition-colors shadow-xs"
           >
-            <User className="w-4 h-4" />
+            <div className="relative">
+              <User className="w-4 h-4 text-slate-700" />
+              {customerUser && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white"></span>
+              )}
+            </div>
+            {customerUser && customerProfile?.fullName && (
+              <span className="hidden md:inline font-bold text-slate-900 max-w-[80px] truncate text-[11px]">
+                {customerProfile.fullName.split(' ')[0]}
+              </span>
+            )}
           </button>
 
           {/* Mobile Menu Button */}
@@ -343,6 +373,23 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <div className="grid grid-cols-2 gap-2 text-xs font-medium">
             <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenAccount();
+              }}
+              className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-left text-amber-950 font-bold flex items-center justify-between col-span-2 shadow-2xs"
+            >
+              <div className="flex items-center gap-2 truncate">
+                <User className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="truncate">
+                  {customerUser ? (customerProfile?.fullName || 'My Customer Account') : 'Customer Sign In / Register'}
+                </span>
+              </div>
+              <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-bold uppercase shrink-0">
+                {customerUser ? 'Account' : 'Portal'}
+              </span>
+            </button>
+            <button
               onClick={() => handleNavClick('home')}
               className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-left text-slate-800"
             >
@@ -378,6 +425,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               Showroom Location & Contact
             </button>
+            {onOpenOrderTracking && (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenOrderTracking();
+                }}
+                className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-bold text-left col-span-2 flex items-center gap-2"
+              >
+                <Truck className="w-4 h-4 text-amber-600" />
+                <span>Track Your Order Status</span>
+              </button>
+            )}
             {onOpenAdmin && (
               <button
                 onClick={() => {

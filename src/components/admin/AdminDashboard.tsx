@@ -25,7 +25,8 @@ import {
   ShieldCheck,
   Check,
   Tag,
-  LogOut
+  LogOut,
+  ShoppingCart
 } from 'lucide-react';
 import { 
   FirestoreProductDoc, 
@@ -33,6 +34,7 @@ import {
   deleteProductFromFirestore 
 } from '../../services/productService';
 import { ProductFormModal } from './ProductFormModal';
+import { AdminOrderManagement } from './AdminOrderManagement';
 import { KhanLogo } from '../KhanLogo';
 
 interface AdminDashboardProps {
@@ -63,6 +65,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedExchangeFilter, setSelectedExchangeFilter] = useState<'All' | 'Exchange' | 'NoExchange'>('All');
   const [selectedProductStatus, setSelectedProductStatus] = useState<'All' | 'Active' | 'Inactive'>('All');
   const [sortBy, setSortBy] = useState<'name' | 'priceAsc' | 'priceDesc' | 'stock' | 'updated'>('updated');
+
+  // Admin Portal Section Tab State
+  const [activeAdminTab, setActiveAdminTab] = useState<'products' | 'orders'>('products');
 
   // Modal States
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -321,6 +326,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
+        {/* Admin Navigation Tabs */}
+        <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+          <button
+            onClick={() => setActiveAdminTab('products')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeAdminTab === 'products'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <Package className="w-4 h-4 text-amber-400" />
+            <span>Product Catalogue ({products.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveAdminTab('orders')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeAdminTab === 'orders'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <ShoppingCart className="w-4 h-4 text-amber-500" />
+            <span>Showroom Orders & Dispatch</span>
+          </button>
+        </div>
+
+        {activeAdminTab === 'orders' ? (
+          <AdminOrderManagement />
+        ) : (
+          <>
         {/* Section Title & Store Context */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
@@ -734,6 +770,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
         </div>
+          </>
+        )}
       </main>
 
       {/* Add / Edit Product Modal */}

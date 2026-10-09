@@ -27,6 +27,13 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Customers Collection (Authenticated Customer Profiles)
+    match /customers/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isAdmin();
+    }
+
     // Products Collection
     match /products/{productId} {
       // Public read for customer storefront
@@ -41,10 +48,10 @@ service cloud.firestore {
 
     // Finance Enquiries Collection (0% Interest Finance)
     match /financeEnquiries/{enquiryId} {
-      // Browsing/listing all records is strictly restricted to authorized administrators
-      allow list: if isAdmin();
-      // Single enquiry lookup allowed by ID or admin; client verification checks phone before displaying details
-      allow get: if isAdmin() || isValidId(enquiryId);
+      // Browsing/listing all records is restricted to admins or customer's own enquiries
+      allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      // Single enquiry lookup allowed by ID or admin or owning customer
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(enquiryId);
       // Public customer can submit an enquiry for eligible appliances (>= 30,000 NPR)
       allow create: if isValidId(enquiryId)
         && request.resource.data.enquiryId == enquiryId
@@ -60,16 +67,52 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // Orders Collection (Showroom Customer Appliance Orders)
     match /orders/{orderId} {
-      allow read: if isValidId(orderId);
-      allow create: if isValidId(orderId) 
-        && request.resource.data.id is string
-        && request.resource.data.total is number;
+      // Administrators can list all orders; signed-in customers can query their own orders
+      allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      // Single order lookup allowed for administrators, owning customer, or by specific order reference
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(orderId);
+      // Public customer order creation with strict validation
+      allow create: if isValidId(orderId)
+        && (request.resource.data.orderId == orderId || request.resource.data.id == orderId)
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() > 0
+        && request.resource.data.customerName.size() <= 200
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() >= 7
+        && request.resource.data.phone.size() <= 30
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount >= 0
+        && request.resource.data.subtotal is number
+        && request.resource.data.subtotal >= 0
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.orderStatus == 'New'
+        && request.resource.data.paymentStatus == 'Unpaid'
+        && request.resource.data.paymentMethod in ['Cash on Delivery', 'Pay at Store'];
+      // Only authenticated and authorized active administrators can update status, payment or delete
+      // Authenticated customers can safely link an unassigned guest order to their own UID
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        (resource.data.customerId == null || resource.data.customerId == '') &&
+        request.resource.data.customerId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['customerId', 'updatedAt'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Registered Appliance Warranties Collection
+    match /warranties/{warrantyId} {
+      allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(warrantyId);
+      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
       allow update, delete: if isAdmin();
     }
 
     match /serviceTickets/{ticketId} {
-      allow read: if isValidId(ticketId);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(ticketId);
       allow create: if isValidId(ticketId)
         && request.resource.data.id is string
         && request.resource.data.phone is string;
@@ -77,7 +120,8 @@ service cloud.firestore {
     }
 
     match /exchangeRequests/{requestId} {
-      allow read: if isValidId(requestId);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(requestId);
       allow create: if isValidId(requestId)
         && request.resource.data.id is string
         && request.resource.data.phone is string;
@@ -85,7 +129,8 @@ service cloud.firestore {
     }
 
     match /financeApplications/{applicationId} {
-      allow read: if isValidId(applicationId);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(applicationId);
       allow create: if isValidId(applicationId)
         && request.resource.data.id is string
         && request.resource.data.citizenshipNo is string;

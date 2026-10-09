@@ -47,19 +47,31 @@
     },
     "Order": {
       "title": "Order",
-      "description": "Customer appliance order placed at Khan Electronics",
+      "description": "Customer showroom appliance purchase order at Khan Electronics, Rajbiraj",
       "type": "object",
       "properties": {
+        "orderId": { "type": "string", "maxLength": 128 },
         "id": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 128 },
         "customerName": { "type": "string", "maxLength": 200 },
         "phone": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 200 },
+        "deliveryAddress": { "type": "object", "description": "Structured delivery address in Nepal" },
+        "items": { "type": "array", "description": "Snapshots of ordered appliances with quantities and pricing" },
         "subtotal": { "type": "number" },
-        "deliveryFee": { "type": "number" },
-        "total": { "type": "number" },
-        "status": { "type": "string", "maxLength": 100 },
-        "createdAt": { "type": "string", "maxLength": 100 }
+        "deliveryCharge": { "type": "number" },
+        "deliveryChargeNote": { "type": "string", "maxLength": 200 },
+        "totalAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["Cash on Delivery", "Pay at Store"] },
+        "paymentStatus": { "type": "string", "enum": ["Unpaid", "Partially Paid", "Paid", "Refunded"] },
+        "orderStatus": { "type": "string", "enum": ["New", "Under Review", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"] },
+        "customerNotes": { "type": "string", "maxLength": 1000 },
+        "adminNotes": { "type": "string", "maxLength": 2000, "description": "Internal showroom notes private to admins" },
+        "confirmedDeliveryInfo": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "customerName", "phone", "total", "status"]
+      "required": ["orderId", "customerName", "phone", "items", "subtotal", "totalAmount", "paymentMethod", "paymentStatus", "orderStatus"]
     },
     "ServiceTicket": {
       "title": "ServiceTicket",
@@ -145,9 +157,51 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["enquiryId", "fullName", "phoneNumber", "email", "citizenshipNumber", "citizenshipIssueDate", "productId", "productPrice", "tenureMonths", "status"]
+    },
+    "CustomerProfile": {
+      "title": "CustomerProfile",
+      "description": "Authenticated customer account profile and saved delivery addresses",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 200 },
+        "savedAddresses": { "type": "array", "description": "Saved delivery addresses in Nepal" },
+        "memberTier": { "type": "string", "enum": ["Regular Customer", "Khan Gold Family", "Showroom VIP"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "fullName", "email"]
+    },
+    "RegisteredWarranty": {
+      "title": "RegisteredWarranty",
+      "description": "Registered appliance manufacturer and showroom warranty records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 250 },
+        "brand": { "type": "string", "maxLength": 100 },
+        "serialNumber": { "type": "string", "maxLength": 100 },
+        "purchaseDate": { "type": "string", "maxLength": 100 },
+        "warrantyExpiry": { "type": "string", "maxLength": 100 },
+        "purchasedFromKhan": { "type": "boolean" },
+        "status": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "productName", "brand", "serialNumber", "status"]
     }
   },
   "firestore": {
+    "/warranties/{warrantyId}": {
+      "schema": "RegisteredWarranty",
+      "description": "Registered appliance warranty documents"
+    },
+    "/customers/{userId}": {
+      "schema": "CustomerProfile",
+      "description": "Authenticated customer profile documents"
+    },
     "/financeEnquiries/{enquiryId}": {
       "schema": "FinanceEnquiry",
       "description": "Finance eligibility enquiry submissions"

@@ -13,22 +13,43 @@ export const INITIAL_USER: CustomerUser = {
 export const INITIAL_ORDERS: Order[] = [
   {
     id: 'KE-2026-8819',
-    createdAt: 'Yesterday, 2:30 PM',
+    orderId: 'KE-2026-8819',
+    createdAt: '2026-10-08T14:30:00.000Z',
+    updatedAt: '2026-10-08T14:30:00.000Z',
+    customerName: 'Bikash Kumar Chaudhary',
+    phone: '9804781290',
+    orderStatus: 'Out for Delivery',
     status: 'Out for Delivery',
     items: [
       {
         productId: 'samsung-refrig-253l',
         productName: 'Samsung 253L Digital Inverter Double Door Refrigerator',
-        productImage: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=400&q=80',
+        imageUrl: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=400&q=80',
         brand: 'Samsung',
-        price: 54990,
-        quantity: 1
+        unitPrice: 54990,
+        quantity: 1,
+        lineTotal: 54990
       }
     ],
     subtotal: 54990,
-    deliveryFee: 0, // Free local within 5 km
+    deliveryCharge: 0,
+    deliveryFee: 0,
+    deliveryChargeNote: 'Free (Within 5 km Rajbiraj Showroom)',
     discount: 2000,
     total: 52990,
+    totalAmount: 52990,
+    deliveryAddress: {
+      fullName: 'Bikash Kumar Chaudhary',
+      phone: '9804781290',
+      municipality: 'Rajbiraj Municipality',
+      wardNo: 'Ward No. 3',
+      district: 'Saptari',
+      province: 'Madhesh Province',
+      streetAddress: 'Main Road, Opposite District Hospital Gate',
+      landmark: 'Opposite District Hospital Gate',
+      isWithin5km: true,
+      deliveryInstructions: 'Please call before arriving. 2-person handling team assigned.'
+    },
     shippingAddress: {
       fullName: 'Bikash Kumar Chaudhary',
       phone: '9804781290',
@@ -40,36 +61,55 @@ export const INITIAL_ORDERS: Order[] = [
       isWithin5km: true
     },
     deliveryType: 'Free Local Delivery (within 5 km Rajbiraj)',
-    paymentMethod: 'Cash on Delivery (COD)',
-    paymentStatus: 'Pending',
+    paymentMethod: 'Cash on Delivery',
+    paymentStatus: 'Unpaid',
     deliveryNote: 'Please call before arriving. 2-person handling team assigned.'
   },
   {
     id: 'KE-2026-6410',
-    createdAt: 'Sep 21, 2026',
+    orderId: 'KE-2026-6410',
+    createdAt: '2026-09-21T10:15:00.000Z',
+    updatedAt: '2026-09-21T16:00:00.000Z',
+    customerName: 'Bikash Kumar Chaudhary',
+    phone: '9804781290',
+    orderStatus: 'Delivered',
     status: 'Delivered',
     items: [
       {
         productId: 'crompton-ameo-mixer',
         productName: 'Crompton Ameo 750W Heavy Duty 4-Jar Mixer Grinder',
-        productImage: 'https://images.unsplash.com/photo-1570222094114-d054a817e56b?auto=format&fit=crop&w=400&q=80',
+        imageUrl: 'https://images.unsplash.com/photo-1570222094114-d054a817e56b?auto=format&fit=crop&w=400&q=80',
         brand: 'Crompton',
-        price: 7490,
-        quantity: 1
+        unitPrice: 7490,
+        quantity: 1,
+        lineTotal: 7490
       },
       {
         productId: 'cg-rice-cooker-28l',
         productName: 'CG 2.8 Liter Deluxe Automatic Electric Rice Cooker',
-        productImage: 'https://images.unsplash.com/photo-1544233726-9f1d2b27be8b?auto=format&fit=crop&w=400&q=80',
+        imageUrl: 'https://images.unsplash.com/photo-1544233726-9f1d2b27be8b?auto=format&fit=crop&w=400&q=80',
         brand: 'CG',
-        price: 4290,
-        quantity: 1
+        unitPrice: 4290,
+        quantity: 1,
+        lineTotal: 4290
       }
     ],
     subtotal: 11780,
+    deliveryCharge: 0,
     deliveryFee: 0,
     discount: 500,
     total: 11280,
+    totalAmount: 11280,
+    deliveryAddress: {
+      fullName: 'Bikash Kumar Chaudhary',
+      phone: '9804781290',
+      municipality: 'Rajbiraj Municipality',
+      wardNo: 'Ward No. 3',
+      district: 'Saptari',
+      province: 'Madhesh Province',
+      streetAddress: 'Near Mahavir Chowk',
+      isWithin5km: true
+    },
     shippingAddress: {
       fullName: 'Bikash Kumar Chaudhary',
       phone: '9804781290',
@@ -80,7 +120,7 @@ export const INITIAL_ORDERS: Order[] = [
       isWithin5km: true
     },
     deliveryType: 'Free Local Delivery (within 5 km Rajbiraj)',
-    paymentMethod: 'Fonepay QR / Mobile Banking',
+    paymentMethod: 'Pay at Store',
     paymentStatus: 'Paid'
   }
 ];

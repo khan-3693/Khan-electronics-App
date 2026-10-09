@@ -57,12 +57,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           {/* Cart Items List */}
           <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 divide-y divide-slate-100">
             {cartItems.length === 0 ? (
-              <div className="text-center py-16 space-y-3">
+              <div className="text-center py-16 space-y-4">
                 <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
                   <ShoppingCart className="w-8 h-8" />
                 </div>
-                <p className="text-sm font-semibold text-slate-900">Your bag is currently empty</p>
-                <p className="text-xs text-slate-500">Explore appliances from Samsung, CG, Godrej and more.</p>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Your bag is currently empty</p>
+                  <p className="text-xs text-slate-500 mt-1">Explore authentic home appliances from Samsung, CG, Godrej and more.</p>
+                </div>
+                <button
+                  onClick={onClose}
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-colors"
+                >
+                  Start Shopping
+                </button>
               </div>
             ) : (
               cartItems.map((item) => (
@@ -87,24 +95,37 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       </div>
 
                       <h4 className="text-xs font-bold text-slate-900 truncate">{item.product.name}</h4>
+                      {item.product.modelNumber && (
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          Model: {item.product.modelNumber}
+                        </div>
+                      )}
 
                       <div className="text-xs text-slate-900 font-black mt-0.5">
                         Rs. {(item.product.price * item.quantity).toLocaleString()}
                       </div>
 
-                      {/* Quantity Controls */}
-                      <div className="flex items-center gap-2 mt-2">
+                      {/* Quantity Controls & Stock Guard */}
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 px-1">
                           <button
                             onClick={() => onUpdateQuantity(item.product.id, item.quantity - 1)}
-                            className="p-1 text-slate-500 hover:text-slate-900"
+                            className="p-1 text-slate-500 hover:text-slate-900 transition-colors"
+                            aria-label="Decrease quantity"
                           >
                             <Minus className="w-3 h-3" />
                           </button>
                           <span className="px-2 text-xs font-bold text-slate-900">{item.quantity}</span>
                           <button
-                            onClick={() => onUpdateQuantity(item.product.id, item.quantity + 1)}
-                            className="p-1 text-slate-500 hover:text-slate-900"
+                            onClick={() => {
+                              const maxStock = item.product.stockCount > 0 ? item.product.stockCount : 99;
+                              if (item.quantity < maxStock) {
+                                onUpdateQuantity(item.product.id, item.quantity + 1);
+                              }
+                            }}
+                            disabled={item.product.stockCount > 0 && item.quantity >= item.product.stockCount}
+                            className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            aria-label="Increase quantity"
                           >
                             <Plus className="w-3 h-3" />
                           </button>
@@ -112,6 +133,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         <span className="text-[10px] text-slate-500">
                           (Rs. {item.product.price.toLocaleString()} each)
                         </span>
+                        {item.product.stockCount > 0 && item.quantity >= item.product.stockCount && (
+                          <span className="text-[10px] text-amber-700 font-medium bg-amber-50 px-1.5 py-0.5 rounded">
+                            Max stock reached
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -149,26 +175,33 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  onClose();
-                  onProceedToCheckout();
-                }}
-                className="w-full py-3.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition-all hover:scale-101"
-              >
-                <Lock className="w-4 h-4" />
-                <span>Proceed to Checkout</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    onClose();
+                    onProceedToCheckout();
+                  }}
+                  className="w-full py-3.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition-all hover:scale-101 cursor-pointer"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>Proceed to Checkout</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
 
-              <div className="flex items-center justify-center gap-3 text-[10px] text-slate-500">
+                <button
+                  onClick={onClose}
+                  className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200 transition-colors"
+                >
+                  Continue Shopping
+                </button>
+              </div>
+
+              <div className="flex items-center justify-center gap-3 text-[10px] text-slate-500 pt-1">
                 <span>Cash on Delivery</span>
                 <span>&bull;</span>
-                <span>Fonepay QR</span>
+                <span>Pay at Showroom</span>
                 <span>&bull;</span>
-                <span>eSewa</span>
-                <span>&bull;</span>
-                <span>Khalti</span>
+                <span>Free &le; 5 KM</span>
               </div>
             </div>
           )}

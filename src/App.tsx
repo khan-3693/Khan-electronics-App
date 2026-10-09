@@ -12,6 +12,7 @@ import { ProductComparisonModal } from './components/ProductComparisonModal';
 import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
 import { CustomerDashboardModal } from './components/CustomerDashboardModal';
+import { OrderTrackingModal } from './components/OrderTrackingModal';
 import { AskKhanAiPlaceholder } from './components/AskKhanAiPlaceholder';
 import { KhanLogo } from './components/KhanLogo';
 import { ProductCard } from './components/ProductCard';
@@ -31,6 +32,8 @@ import {
   logoutAdmin, 
   AdminUserDoc 
 } from './services/adminAuthService';
+import { getOrCreateCustomerProfile } from './services/customerAuthService';
+import { cleanFirestoreObject } from './services/orderService';
 import { isProductFinanceEligible } from './services/financeService';
 import { doc, setDoc } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './services/firebase';
@@ -52,7 +55,8 @@ import {
   ExchangeRequest, 
   FinanceApplication, 
   RegisteredWarranty,
-  ApplianceCategory
+  ApplianceCategory,
+  CustomerProfile
 } from './types';
 
 import { 
@@ -104,9 +108,21 @@ export default function App() {
     loading: true
   });
 
+  // Firebase Customer Authentication State (Separate from admin permissions)
+  const [customerAuth, setCustomerAuth] = useState<{
+    user: FirebaseUser | null;
+    profile: CustomerProfile | null;
+    loading: boolean;
+  }>({
+    user: null,
+    profile: null,
+    loading: true
+  });
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        // 1. Check Admin Permissions
         try {
           const authResult = await verifyAndEnsureAdmin(firebaseUser);
           setAdminAuth({
@@ -125,11 +141,33 @@ export default function App() {
             error: 'Failed to verify admin status'
           });
         }
+
+        // 2. Load Customer Account Profile
+        try {
+          const profile = await getOrCreateCustomerProfile(firebaseUser);
+          setCustomerAuth({
+            user: firebaseUser,
+            profile,
+            loading: false
+          });
+        } catch (err) {
+          console.warn('Customer profile load note:', err);
+          setCustomerAuth({
+            user: firebaseUser,
+            profile: null,
+            loading: false
+          });
+        }
       } else {
         setAdminAuth({
           user: null,
           isAuthorized: false,
           adminDoc: null,
+          loading: false
+        });
+        setCustomerAuth({
+          user: null,
+          profile: null,
           loading: false
         });
       }
@@ -208,10 +246,17 @@ export default function App() {
   const [selectedProductForDetail, setSelectedProductForDetail] = useState<Product | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [isOrderTrackingOpen, setIsOrderTrackingOpen] = useState(false);
+  const [trackingOrderId, setTrackingOrderId] = useState<string>('');
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
   const [aiProductContext, setAiProductContext] = useState<Product | null>(null);
+
+  const handleOpenOrderTracking = (orderId?: string) => {
+    setTrackingOrderId(orderId || '');
+    setIsOrderTrackingOpen(true);
+  };
 
   // Firestore Products Database State & Verification
   const [firestoreStatus, setFirestoreStatus] = useState<{
@@ -373,16 +418,19 @@ export default function App() {
     } catch {}
   }, [cartItems, orders, serviceTickets, exchangeRequests, financeApplications, warranties]);
 
-  // Cart operations
+  // Cart operations with stock validation
   const handleAddToCart = (product: Product, quantity = 1) => {
+    const validQty = Math.max(1, Math.floor(quantity));
     setCartItems(prev => {
       const existing = prev.find(item => item.product.id === product.id);
+      const maxStock = product.stockCount > 0 ? product.stockCount : 99;
       if (existing) {
+        const newQty = Math.min(maxStock, existing.quantity + validQty);
         return prev.map(item =>
-          item.product.id === product.id ? { ...item, quantity: item.quantity + quantity } : item
+          item.product.id === product.id ? { ...item, quantity: newQty } : item
         );
       }
-      return [...prev, { product, quantity }];
+      return [...prev, { product, quantity: Math.min(maxStock, validQty) }];
     });
   };
 
@@ -397,7 +445,13 @@ export default function App() {
       setCartItems(prev => prev.filter(item => item.product.id !== productId));
     } else {
       setCartItems(prev =>
-        prev.map(item => item.product.id === productId ? { ...item, quantity } : item)
+        prev.map(item => {
+          if (item.product.id === productId) {
+            const maxStock = item.product.stockCount > 0 ? item.product.stockCount : 99;
+            return { ...item, quantity: Math.min(maxStock, Math.max(1, Math.floor(quantity))) };
+          }
+          return item;
+        })
       );
     }
   };
@@ -425,40 +479,47 @@ export default function App() {
     }
   };
 
-  // Order Placement (with Firestore synchronization)
-  const handleOrderPlaced = async (newOrder: Order) => {
-    setOrders(prev => [newOrder, ...prev]);
+  // Order Placement (Order is created and verified in Firestore by orderService)
+  const handleOrderPlaced = (newOrder: Order) => {
+    setOrders(prev => [newOrder, ...prev.filter(o => (o.orderId || o.id) !== (newOrder.orderId || newOrder.id))]);
     setCartItems([]);
-    try {
-      await setDoc(doc(db, 'orders', newOrder.id), newOrder);
-    } catch (err) {
-      console.warn('Firestore order sync:', err);
-    }
   };
 
   // Submissions (with Firestore synchronization)
   const handleSubmitExchange = async (newRequest: ExchangeRequest) => {
-    setExchangeRequests(prev => [newRequest, ...prev]);
+    const payload = {
+      ...newRequest,
+      customerId: customerAuth.user?.uid || null
+    };
+    setExchangeRequests(prev => [payload as ExchangeRequest, ...prev]);
     try {
-      await setDoc(doc(db, 'exchangeRequests', newRequest.id), newRequest);
+      await setDoc(doc(db, 'exchangeRequests', newRequest.id), cleanFirestoreObject(payload));
     } catch (err) {
       console.warn('Firestore exchange sync:', err);
     }
   };
 
   const handleSubmitFinance = async (newApp: FinanceApplication) => {
-    setFinanceApplications(prev => [newApp, ...prev]);
+    const payload = {
+      ...newApp,
+      customerId: customerAuth.user?.uid || null
+    };
+    setFinanceApplications(prev => [payload as FinanceApplication, ...prev]);
     try {
-      await setDoc(doc(db, 'financeApplications', newApp.id), newApp);
+      await setDoc(doc(db, 'financeApplications', newApp.id), cleanFirestoreObject(payload));
     } catch (err) {
       console.warn('Firestore finance sync:', err);
     }
   };
 
   const handleSubmitServiceTicket = async (newTicket: ServiceTicket) => {
-    setServiceTickets(prev => [newTicket, ...prev]);
+    const payload = {
+      ...newTicket,
+      customerId: customerAuth.user?.uid || null
+    };
+    setServiceTickets(prev => [payload as ServiceTicket, ...prev]);
     try {
-      await setDoc(doc(db, 'serviceTickets', newTicket.id), newTicket);
+      await setDoc(doc(db, 'serviceTickets', newTicket.id), cleanFirestoreObject(payload));
     } catch (err) {
       console.warn('Firestore service ticket sync:', err);
     }
@@ -561,7 +622,11 @@ export default function App() {
         setSearchQuery={setSearchQuery}
         firestoreProductCount={firestoreStatus.productCount}
         onOpenFirestoreStatus={() => setIsFirestoreModalOpen(true)}
+        onOpenOrderTracking={() => handleOpenOrderTracking()}
         onOpenAdmin={() => handleNavigateView('admin')}
+        customerUser={customerAuth.user}
+        customerProfile={customerAuth.profile}
+        isCustomerAuthLoading={customerAuth.loading}
       />
 
       {/* Main View Display */}
@@ -744,12 +809,11 @@ export default function App() {
             <CustomerDashboardModal
               isOpen={true}
               onClose={() => setActiveView('home')}
-              user={INITIAL_USER}
-              orders={orders}
-              serviceTickets={serviceTickets}
-              exchangeRequests={exchangeRequests}
-              financeApplications={financeApplications}
-              warranties={warranties}
+              onOpenOrderTracking={handleOpenOrderTracking}
+              onNavigateToCatalog={() => setActiveView('catalog')}
+              onNavigateToService={() => setActiveView('service')}
+              onNavigateToExchange={() => setActiveView('exchange')}
+              onNavigateToFinance={() => setActiveView('finance')}
             />
           </div>
         )}
@@ -901,6 +965,16 @@ export default function App() {
           onClose={() => setIsCheckoutOpen(false)}
           cartItems={cartItems}
           onOrderPlaced={handleOrderPlaced}
+          onOpenOrderTracking={handleOpenOrderTracking}
+          customerProfile={customerAuth.profile}
+        />
+      )}
+
+      {isOrderTrackingOpen && (
+        <OrderTrackingModal
+          isOpen={isOrderTrackingOpen}
+          onClose={() => setIsOrderTrackingOpen(false)}
+          initialOrderId={trackingOrderId}
         />
       )}
 
@@ -908,12 +982,23 @@ export default function App() {
         <CustomerDashboardModal
           isOpen={isAccountOpen}
           onClose={() => setIsAccountOpen(false)}
-          user={INITIAL_USER}
-          orders={orders}
-          serviceTickets={serviceTickets}
-          exchangeRequests={exchangeRequests}
-          financeApplications={financeApplications}
-          warranties={warranties}
+          onOpenOrderTracking={handleOpenOrderTracking}
+          onNavigateToCatalog={() => {
+            setActiveView('catalog');
+            setIsAccountOpen(false);
+          }}
+          onNavigateToService={() => {
+            setActiveView('service');
+            setIsAccountOpen(false);
+          }}
+          onNavigateToExchange={() => {
+            setActiveView('exchange');
+            setIsAccountOpen(false);
+          }}
+          onNavigateToFinance={() => {
+            setActiveView('finance');
+            setIsAccountOpen(false);
+          }}
         />
       )}
 

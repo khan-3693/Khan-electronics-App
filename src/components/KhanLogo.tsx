@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 export interface KhanLogoProps {
@@ -9,10 +10,10 @@ export interface KhanLogoProps {
 
 /**
  * Official Brand Logo for Khan Electronics
- * Uses official brand assets:
- * - Horizontal Logo: /brand/khan-electronics-logo.png
+ * Uses these brand assets:
+ * - Full Horizontal Logo: /brand/khan-electronics-logo.png
  * - Icon-Only Logo: /brand/khan-electronics-icon.png
- * - Dark-surface Variant: /brand/khan-electronics-logo-white.png
+ * - White Logo for Dark Backgrounds: /brand/khan-electronics-logo-white.png
  */
 export const KhanLogo: React.FC<KhanLogoProps> = ({
   variant = 'header',
@@ -20,14 +21,14 @@ export const KhanLogo: React.FC<KhanLogoProps> = ({
   className = '',
   forceIconOnly = false
 }) => {
-  // If explicitly requested icon-only
+  // Icon-only variant
   if (forceIconOnly || variant === 'icon-only') {
     return (
       <div className={`inline-flex items-center shrink-0 ${className}`}>
         <img
           src="/brand/khan-electronics-icon.png"
           alt="Khan Electronics"
-          className="h-9 w-9 object-contain select-none"
+          className="h-15 w-auto object-contain select-none"
           loading="eager"
           decoding="async"
         />
@@ -35,27 +36,25 @@ export const KhanLogo: React.FC<KhanLogoProps> = ({
     );
   }
 
-  // Header variant: Responsive (full horizontal on sm/desktop, icon-only on narrow mobile)
+  // Header: Full logo on larger screens, icon and text on mobile
   if (variant === 'header') {
     return (
       <div className={`flex items-center shrink-0 ${className}`}>
-        {/* Desktop & Tablet: Full Horizontal Logo */}
         <div className="hidden sm:block">
           <img
             src="/brand/khan-electronics-logo.png"
             alt="Khan Electronics - New Khan Automobiles & Electronics"
-            className="h-11 md:h-12 w-auto object-contain select-none transition-opacity duration-200 hover:opacity-95"
+            className="h-15 md:h-17 w-auto object-contain select-none transition-opacity duration-200 hover:opacity-95"
             loading="eager"
             decoding="async"
           />
         </div>
 
-        {/* Mobile Narrow Screens: Official KH Icon-only Logo */}
         <div className="flex sm:hidden items-center gap-2">
           <img
             src="/brand/khan-electronics-icon.png"
             alt="Khan Electronics"
-            className="h-10 w-10 object-contain select-none"
+            className="h-14 w-14 object-contain select-none"
             loading="eager"
             decoding="async"
           />
@@ -74,11 +73,10 @@ export const KhanLogo: React.FC<KhanLogoProps> = ({
     );
   }
 
-  // Admin Portal variant
+  // Admin Portal
   if (variant === 'admin') {
     return (
       <div className={`flex items-center gap-2.5 shrink-0 ${className}`}>
-        {/* Desktop Admin: Full Horizontal Logo */}
         <div className="hidden md:block">
           <img
             src="/brand/khan-electronics-logo.png"
@@ -89,7 +87,6 @@ export const KhanLogo: React.FC<KhanLogoProps> = ({
           />
         </div>
 
-        {/* Mobile / Compact Admin: KH Icon */}
         <div className="flex md:hidden items-center gap-2">
           <img
             src="/brand/khan-electronics-icon.png"
@@ -110,14 +107,14 @@ export const KhanLogo: React.FC<KhanLogoProps> = ({
     );
   }
 
-  // Hero Section variant
+  // Hero Section: Larger official full logo
   if (variant === 'hero') {
     return (
       <div className={`inline-flex items-center shrink-0 ${className}`}>
         <img
           src="/brand/khan-electronics-logo.png"
           alt="Khan Electronics"
-          className="h-12 sm:h-14 w-auto object-contain select-none"
+          className="h-20 sm:h-24 md:h-28 lg:h-32 w-auto max-w-full object-contain object-left select-none"
           loading="eager"
           decoding="async"
         />
@@ -125,14 +122,14 @@ export const KhanLogo: React.FC<KhanLogoProps> = ({
     );
   }
 
-  // Footer variant
+  // Footer
   if (variant === 'footer') {
     return (
       <div className={`inline-flex items-center shrink-0 ${className}`}>
         <img
           src="/brand/khan-electronics-logo.png"
           alt="Khan Electronics"
-          className="h-10 w-auto object-contain select-none"
+          className="h-16 w-auto object-contain select-none"
           loading="lazy"
           decoding="async"
         />
@@ -140,7 +137,7 @@ export const KhanLogo: React.FC<KhanLogoProps> = ({
     );
   }
 
-  // Admin Login page variant (optimized for dark slate-900 background)
+  // Admin Login: White logo on dark background
   if (variant === 'login') {
     return (
       <div className={`flex flex-col items-center justify-center text-center space-y-2 shrink-0 ${className}`}>
@@ -155,13 +152,13 @@ export const KhanLogo: React.FC<KhanLogoProps> = ({
     );
   }
 
-  // Default / Compact variant
+  // Default / Compact
   return (
     <div className={`flex items-center gap-2 shrink-0 ${className}`}>
       <img
         src="/brand/khan-electronics-icon.png"
         alt="Khan Electronics"
-        className="h-8 w-8 object-contain select-none"
+        className="h-12 w-auto object-contain select-none"
         loading="lazy"
         decoding="async"
       />

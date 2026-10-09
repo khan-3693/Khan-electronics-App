@@ -82,26 +82,79 @@ export interface ShippingAddress {
   isWithin5km: boolean; // Free delivery if true
 }
 
+export type OrderStatus = 
+  | 'New'
+  | 'Under Review'
+  | 'Confirmed'
+  | 'Preparing'
+  | 'Out for Delivery'
+  | 'Delivered'
+  | 'Cancelled';
+
+export type OrderPaymentStatus = 
+  | 'Unpaid'
+  | 'Partially Paid'
+  | 'Paid'
+  | 'Refunded';
+
+export type OrderPaymentMethod = 
+  | 'Cash on Delivery'
+  | 'Pay at Store';
+
+export interface OrderItemSnapshot {
+  productId: string;
+  productName: string;
+  modelNumber?: string;
+  brand?: string;
+  imageUrl: string;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+}
+
+export interface OrderDeliveryAddress {
+  fullName: string;
+  phone: string;
+  email?: string | null;
+  province: string;
+  district: string;
+  municipality: string;
+  wardNo: string;
+  streetAddress: string;
+  landmark?: string | null;
+  isWithin5km: boolean;
+  deliveryInstructions?: string | null;
+}
+
 export interface Order {
   id: string;
-  createdAt: string;
-  status: 'Confirmed' | 'Processing in Rajbiraj Store' | 'Out for Delivery' | 'Delivered' | 'Cancelled';
-  items: {
-    productId: string;
-    productName: string;
-    productImage: string;
-    brand: string;
-    price: number;
-    quantity: number;
-  }[];
+  orderId: string;
+  customerId?: string | null;
+  customerName: string;
+  phone: string;
+  email?: string | null;
+  deliveryAddress: OrderDeliveryAddress;
+  items: OrderItemSnapshot[];
   subtotal: number;
-  deliveryFee: number; // 0 for within 5km, else Rs 500-1500
-  discount: number;
-  total: number;
-  shippingAddress: ShippingAddress;
-  deliveryType: 'Free Local Delivery (within 5 km Rajbiraj)' | 'Nepal-Wide Standard Freight';
-  paymentMethod: 'Cash on Delivery (COD)' | 'Fonepay QR / Mobile Banking' | 'eSewa' | 'Khalti' | 'Debit/Credit Card';
-  paymentStatus: 'Pending' | 'Paid';
+  deliveryCharge: number | null;
+  deliveryChargeNote?: string;
+  totalAmount: number;
+  paymentMethod: OrderPaymentMethod | string;
+  paymentStatus: OrderPaymentStatus | string;
+  orderStatus: OrderStatus;
+  customerNotes?: string;
+  adminNotes?: string;
+  confirmedDeliveryInfo?: string;
+  createdAt: string;
+  updatedAt: string;
+
+  // Compatibility fields
+  status?: string;
+  total?: number;
+  deliveryFee?: number;
+  discount?: number;
+  shippingAddress?: ShippingAddress;
+  deliveryType?: string;
   deliveryNote?: string;
 }
 
@@ -177,6 +230,32 @@ export interface RegisteredWarranty {
   status: 'Active Official Warranty' | 'Service Coverage Active' | 'Expired';
 }
 
+export interface SavedAddress {
+  id: string;
+  label: string; // e.g., 'Home', 'Office', 'Store Delivery'
+  fullName: string;
+  phone: string;
+  province: string;
+  district: string;
+  municipality: string;
+  wardNo: string;
+  streetAddress: string;
+  landmark?: string | null;
+  isWithin5km: boolean;
+  isDefault?: boolean;
+}
+
+export interface CustomerProfile {
+  uid: string;
+  fullName: string;
+  phone: string;
+  email: string;
+  savedAddresses: SavedAddress[];
+  memberTier: 'Regular Customer' | 'Khan Gold Family' | 'Showroom VIP';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CustomerUser {
   id: string;
   name: string;
@@ -184,7 +263,7 @@ export interface CustomerUser {
   email: string;
   address: string;
   city: string;
-  memberTier: 'Regular Customer' | 'Khan Gold Family';
+  memberTier: 'Regular Customer' | 'Khan Gold Family' | 'Showroom VIP';
 }
 
 export type FinanceTenureMonths = 6 | 9 | 12 | 24;
