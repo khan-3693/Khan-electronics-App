@@ -170,7 +170,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-10 space-y-12">
       {/* 1. HERO BANNER: 0% INTEREST FINANCE HIGHLIGHT */}
       <div className="relative rounded-3xl p-6 sm:p-10 bg-gradient-to-br from-amber-500 via-amber-600 to-amber-700 text-slate-950 shadow-xl overflow-hidden">
         {/* Subtle decorative circles */}

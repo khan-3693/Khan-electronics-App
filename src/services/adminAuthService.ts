@@ -13,7 +13,7 @@ import {
   setDoc, 
   Timestamp 
 } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { adminAuth, adminDb, handleFirestoreError, OperationType } from './firebase';
 
 export const INITIAL_ADMIN_EMAIL = 'nkae.rjb@gmail.com';
 
@@ -43,7 +43,7 @@ export async function verifyAndEnsureAdmin(user: User): Promise<{
 }> {
   const path = 'adminUsers';
   try {
-    const adminDocRef = doc(db, path, user.uid);
+    const adminDocRef = doc(adminDb, path, user.uid);
     const docSnap = await getDoc(adminDocRef);
 
     if (docSnap.exists()) {
@@ -77,19 +77,11 @@ export async function verifyAndEnsureAdmin(user: User): Promise<{
     };
   } catch (error) {
     console.error('Error verifying admin authorization:', error);
-    // If user's email matches initial admin, they still have valid credentials
-    if (user.email && user.email.toLowerCase() === INITIAL_ADMIN_EMAIL.toLowerCase()) {
-      return { 
-        isAuthorized: true, 
-        adminDoc: {
-          email: user.email.toLowerCase(),
-          role: 'admin',
-          active: true,
-          createdAt: Timestamp.now()
-        } 
-      };
+    try {
+      handleFirestoreError(error, OperationType.GET, path, adminAuth);
+    } catch {
+      // Handled and logged; fail closed
     }
-    handleFirestoreError(error, OperationType.GET, path);
     return { 
       isAuthorized: false, 
       adminDoc: null, 
@@ -99,14 +91,14 @@ export async function verifyAndEnsureAdmin(user: User): Promise<{
 }
 
 /**
- * Sign in admin using Email & Password.
+ * Sign in admin using Email & Password on the isolated adminAuth instance.
  * If the initial admin user does not exist in Firebase Auth yet, creates the account automatically.
  */
 export async function loginAdminWithEmailPassword(email: string, pass: string): Promise<User> {
   const normalizedEmail = email.trim().toLowerCase();
   
   try {
-    const cred = await signInWithEmailAndPassword(auth, normalizedEmail, pass);
+    const cred = await signInWithEmailAndPassword(adminAuth, normalizedEmail, pass);
     return cred.user;
   } catch (error: any) {
     // If account doesn't exist yet and it's the designated initial admin, register it
@@ -115,9 +107,9 @@ export async function loginAdminWithEmailPassword(email: string, pass: string): 
       normalizedEmail === INITIAL_ADMIN_EMAIL.toLowerCase()
     ) {
       try {
-        const newCred = await createUserWithEmailAndPassword(auth, normalizedEmail, pass);
+        const newCred = await createUserWithEmailAndPassword(adminAuth, normalizedEmail, pass);
         // Bootstrap admin record in Firestore
-        await setDoc(doc(db, 'adminUsers', newCred.user.uid), {
+        await setDoc(doc(adminDb, 'adminUsers', newCred.user.uid), {
           email: normalizedEmail,
           role: 'admin',
           active: true,
@@ -136,7 +128,7 @@ export async function loginAdminWithEmailPassword(email: string, pass: string): 
 }
 
 /**
- * Sign in admin using Google Sign-In (1-Click Popup Auth).
+ * Sign in admin using Google Sign-In on the isolated adminAuth instance.
  * Recommended default since Google Login is natively pre-configured by Firebase.
  */
 export async function loginAdminWithGoogle(): Promise<User> {
@@ -147,7 +139,7 @@ export async function loginAdminWithGoogle(): Promise<User> {
   });
 
   try {
-    const cred = await signInWithPopup(auth, provider);
+    const cred = await signInWithPopup(adminAuth, provider);
     await verifyAndEnsureAdmin(cred.user);
     return cred.user;
   } catch (error: any) {
@@ -162,10 +154,10 @@ export async function loginAdminWithGoogle(): Promise<User> {
 }
 
 /**
- * Signs out the current admin
+ * Signs out the current admin from the isolated adminAuth instance
  */
 export async function logoutAdmin(): Promise<void> {
-  await signOut(auth);
+  await signOut(adminAuth);
 }
 
 /**

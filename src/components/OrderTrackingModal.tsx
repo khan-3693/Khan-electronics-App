@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Search, 
@@ -15,15 +15,18 @@ import {
   Loader2,
   Copy,
   ArrowRight,
-  Check
+  Check,
+  Radio
 } from 'lucide-react';
-import { Order, OrderStatus } from '../types';
-import { fetchCustomerOrderWithVerification } from '../services/orderService';
+import { Order, OrderStatus, CustomerProfile } from '../types';
+import { fetchCustomerOrderWithVerification, subscribeToOrder } from '../services/orderService';
 
 interface OrderTrackingModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialOrderId?: string;
+  initialPhone?: string;
+  customerProfile?: CustomerProfile | null;
 }
 
 const ORDER_STEPS: { status: OrderStatus; label: string; desc: string }[] = [
@@ -38,20 +41,69 @@ const ORDER_STEPS: { status: OrderStatus; label: string; desc: string }[] = [
 export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   isOpen,
   onClose,
-  initialOrderId = ''
+  initialOrderId = '',
+  initialPhone = '',
+  customerProfile
 }) => {
   const [orderRef, setOrderRef] = useState(initialOrderId);
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(initialPhone || customerProfile?.phone || '');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [trackedOrder, setTrackedOrder] = useState<Order | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isLiveSynced, setIsLiveSynced] = useState(false);
 
+  // Initialize inputs and auto-verify if both reference and phone are provided
   useEffect(() => {
     if (initialOrderId) {
       setOrderRef(initialOrderId);
     }
-  }, [initialOrderId]);
+    const phoneToSet = initialPhone || customerProfile?.phone || '';
+    if (phoneToSet && !phone) {
+      setPhone(phoneToSet);
+    }
+
+    if (isOpen && initialOrderId && (initialPhone || customerProfile?.phone)) {
+      const activePhone = initialPhone || customerProfile?.phone || '';
+      setIsLoading(true);
+      setErrorMsg(null);
+      fetchCustomerOrderWithVerification(initialOrderId, activePhone)
+        .then((order) => {
+          setTrackedOrder(order);
+        })
+        .catch((err) => {
+          setErrorMsg(err instanceof Error ? err.message : 'Unable to find or verify this order.');
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
+    }
+  }, [initialOrderId, initialPhone, customerProfile, isOpen]);
+
+  // Real-time listener: subscribe to live updates as soon as an order is tracked
+  useEffect(() => {
+    if (!isOpen || !trackedOrder?.orderId) {
+      setIsLiveSynced(false);
+      return;
+    }
+
+    setIsLiveSynced(true);
+    const unsubscribe = subscribeToOrder(
+      trackedOrder.orderId,
+      (liveOrder) => {
+        setTrackedOrder(liveOrder);
+        setIsLiveSynced(true);
+      },
+      (err) => {
+        console.warn('Real-time order subscription notice:', err.message);
+      }
+    );
+
+    return () => {
+      unsubscribe();
+      setIsLiveSynced(false);
+    };
+  }, [isOpen, trackedOrder?.orderId]);
 
   if (!isOpen) return null;
 
@@ -100,12 +152,14 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
     return idx >= 0 ? idx : 0;
   };
 
-  const currentStepIdx = trackedOrder ? getCurrentStepIndex(trackedOrder.orderStatus || trackedOrder.status) : 0;
-  const isCancelled = trackedOrder?.orderStatus === 'Cancelled' || trackedOrder?.status === 'Cancelled';
+  const currentStatusString = trackedOrder?.orderStatus || trackedOrder?.status || 'New';
+  const currentStepIdx = trackedOrder ? getCurrentStepIndex(currentStatusString) : 0;
+  const isDelivered = currentStatusString.toLowerCase() === 'delivered';
+  const isCancelled = currentStatusString.toLowerCase() === 'cancelled';
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 md:p-6 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden my-auto max-h-[94vh] flex flex-col">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 md:p-6 animate-modal-backdrop">
+      <div className="relative w-full max-w-2xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden my-auto max-h-[94vh] flex flex-col animate-modal-content">
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between bg-white shrink-0">
           <div className="flex items-center gap-2.5">
@@ -113,9 +167,17 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
               <Search className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-display font-bold text-slate-900">
-                Track Your Appliance Order
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-display font-bold text-slate-900">
+                  Track Your Appliance Order
+                </h2>
+                {isLiveSynced && trackedOrder && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[10px] font-bold border border-emerald-200 animate-in fade-in">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Live Showroom Sync
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-500">
                 Live Status &bull; New Khan Automobiles & Electronics, Rajbiraj
               </p>
@@ -239,22 +301,31 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
                     </button>
                     {copied && <span className="text-[10px] text-emerald-700 font-bold">Copied!</span>}
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                  <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
                     <span>Placed: {new Date(trackedOrder.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                     <span>&bull;</span>
-                    <span>Payment: <strong className="text-slate-800">{trackedOrder.paymentMethod} ({trackedOrder.paymentStatus})</strong></span>
+                    <span className="flex items-center gap-1.5">
+                      Payment: <strong className="text-slate-800">{trackedOrder.paymentMethod}</strong>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        trackedOrder.paymentStatus === 'Paid'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}>
+                        {trackedOrder.paymentStatus}
+                      </span>
+                    </span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                    trackedOrder.orderStatus === 'Delivered' 
+                    isDelivered 
                       ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                      : trackedOrder.orderStatus === 'Cancelled'
+                      : isCancelled
                       ? 'bg-rose-50 text-rose-800 border-rose-200'
                       : 'bg-amber-50 text-amber-900 border-amber-200'
                   }`}>
-                    {trackedOrder.orderStatus || trackedOrder.status}
+                    {currentStatusString}
                   </span>
 
                   <button

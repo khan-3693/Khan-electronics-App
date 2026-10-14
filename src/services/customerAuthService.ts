@@ -5,6 +5,8 @@ import {
   sendPasswordResetEmail,
   updateProfile,
   updatePassword,
+  verifyBeforeUpdateEmail,
+  updateEmail,
   EmailAuthProvider,
   reauthenticateWithCredential,
   User as FirebaseUser
@@ -20,7 +22,13 @@ import {
   orderBy, 
   getDocs 
 } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { 
+  ref, 
+  uploadBytes, 
+  getDownloadURL, 
+  deleteObject 
+} from 'firebase/storage';
+import { auth, db, storage, handleFirestoreError, OperationType } from './firebase';
 import { 
   CustomerProfile, 
   SavedAddress, 
@@ -104,14 +112,41 @@ export async function loginCustomer(email: string, password: string): Promise<Cu
 }
 
 /**
- * Helper to fetch or bootstrap a customer's profile upon sign-in
+ * Helper to check if a user is authenticated via Google Sign-In
+ */
+export function isGoogleAuthUser(user: FirebaseUser | null): boolean {
+  if (!user) return false;
+  return user.providerData.some(p => p.providerId === 'google.com');
+}
+
+/**
+ * Helper to check if a user is authenticated via Email/Password
+ */
+export function isPasswordAuthUser(user: FirebaseUser | null): boolean {
+  if (!user) return false;
+  return user.providerData.some(p => p.providerId === 'password');
+}
+
+/**
+ * Helper to fetch or bootstrap a customer's profile upon sign-in.
+ * Also keeps the Firestore email synchronized with the Firebase Auth email if verified.
  */
 export async function getOrCreateCustomerProfile(user: FirebaseUser): Promise<CustomerProfile> {
   const profileRef = doc(db, 'customers', user.uid);
   try {
     const snap = await getDoc(profileRef);
     if (snap.exists()) {
-      return snap.data() as CustomerProfile;
+      const data = snap.data() as CustomerProfile;
+      // If user.email has changed (e.g. after verifying email change), sync it to Firestore
+      if (user.email && data.email && user.email.toLowerCase() !== data.email.toLowerCase()) {
+        const syncedEmail = user.email.toLowerCase();
+        await updateDoc(profileRef, cleanFirestoreObject({
+          email: syncedEmail,
+          updatedAt: new Date().toISOString()
+        }));
+        return { ...data, email: syncedEmail };
+      }
+      return data;
     }
 
     // Bootstrap profile if document does not exist yet
@@ -121,6 +156,8 @@ export async function getOrCreateCustomerProfile(user: FirebaseUser): Promise<Cu
       fullName: user.displayName || 'Valued Customer',
       phone: user.phoneNumber || '',
       email: user.email?.toLowerCase() || '',
+      photoUrl: user.photoURL || null,
+      photoStoragePath: null,
       savedAddresses: [],
       memberTier: 'Regular Customer',
       createdAt: nowIso,
@@ -170,6 +207,285 @@ export async function changeCustomerPassword(
   const credential = EmailAuthProvider.credential(user.email, currentPassword);
   await reauthenticateWithCredential(user, credential);
   await updatePassword(user, newPassword);
+}
+
+/**
+ * Result of requesting an email change
+ */
+export interface EmailChangeResult {
+  requiresVerification: boolean;
+  emailSentTo: string;
+  immediateUpdate: boolean;
+  message: string;
+}
+
+/**
+ * Safely updates customer email in Firebase Auth and synchronizes with Firestore.
+ * Handles reauthentication, Google vs Email/Password providers, and email verification.
+ */
+export async function changeCustomerEmail(params: {
+  newEmail: string;
+  currentPassword?: string;
+}): Promise<EmailChangeResult> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('You must be signed in to change your email.');
+  }
+
+  const cleanNewEmail = params.newEmail.trim().toLowerCase();
+  if (!cleanNewEmail || !cleanNewEmail.includes('@') || !cleanNewEmail.includes('.')) {
+    throw new Error('Please enter a valid new email address.');
+  }
+
+  if (cleanNewEmail === user.email?.toLowerCase()) {
+    throw new Error('New email address is the same as your current email address.');
+  }
+
+  // Handle Google accounts
+  if (isGoogleAuthUser(user)) {
+    throw new Error(
+      'Your account is secured via Google Sign-In. Email addresses for Google accounts are managed directly through your Google Account settings.'
+    );
+  }
+
+  // Re-authenticate with current password if password user
+  if (isPasswordAuthUser(user)) {
+    if (!params.currentPassword) {
+      throw new Error('For security, please enter your current password to confirm this change.');
+    }
+    if (!user.email) {
+      throw new Error('Current user has no associated email.');
+    }
+
+    try {
+      const credential = EmailAuthProvider.credential(user.email, params.currentPassword);
+      await reauthenticateWithCredential(user, credential);
+    } catch (reauthErr: any) {
+      if (reauthErr.code === 'auth/wrong-password' || reauthErr.code === 'auth/invalid-credential') {
+        throw new Error('Incorrect current password. Please re-enter your password to proceed.');
+      }
+      if (reauthErr.code === 'auth/too-many-requests') {
+        throw new Error('Too many failed attempts. Please wait a moment and try again.');
+      }
+      throw reauthErr;
+    }
+  }
+
+  // Attempt email update using installed Firebase SDK
+  // In modern Firebase SDKs, verifyBeforeUpdateEmail sends a confirmation link to the new address
+  try {
+    await verifyBeforeUpdateEmail(user, cleanNewEmail);
+    return {
+      requiresVerification: true,
+      emailSentTo: cleanNewEmail,
+      immediateUpdate: false,
+      message: `A verification link has been sent to ${cleanNewEmail}. Please check your inbox and click the link to confirm your new email address.`
+    };
+  } catch (err: any) {
+    // If operation-not-allowed is thrown by Firebase for verifyBeforeUpdateEmail, fallback to updateEmail
+    if (err.code === 'auth/operation-not-allowed') {
+      try {
+        await updateEmail(user, cleanNewEmail);
+        // Synchronize Firestore profile
+        const profileRef = doc(db, 'customers', user.uid);
+        await updateDoc(profileRef, cleanFirestoreObject({
+          email: cleanNewEmail,
+          updatedAt: new Date().toISOString()
+        }));
+        return {
+          requiresVerification: false,
+          emailSentTo: cleanNewEmail,
+          immediateUpdate: true,
+          message: `Your email address has been successfully updated to ${cleanNewEmail}.`
+        };
+      } catch (updateErr: any) {
+        if (updateErr.code === 'auth/requires-recent-login') {
+          throw new Error('Recent login required. Please enter your current password to verify your account.');
+        }
+        if (updateErr.code === 'auth/email-already-in-use') {
+          throw new Error('This email address is already in use by another account.');
+        }
+        throw updateErr;
+      }
+    }
+
+    if (err.code === 'auth/requires-recent-login') {
+      throw new Error('Security check required. Please provide your current password to continue.');
+    }
+    if (err.code === 'auth/email-already-in-use') {
+      throw new Error('This email address is already registered with another account.');
+    }
+    if (err.code === 'auth/invalid-email') {
+      throw new Error('Invalid email address format.');
+    }
+    throw err;
+  }
+}
+
+/**
+ * Checks if the user's verified Firebase Auth email differs from Firestore and syncs them.
+ */
+export async function syncCustomerEmailWithAuth(uid: string): Promise<{
+  synced: boolean;
+  email: string;
+  isVerified: boolean;
+}> {
+  const user = auth.currentUser;
+  if (!user || user.uid !== uid) {
+    throw new Error('User is not currently authenticated.');
+  }
+
+  // Reload the auth user to pick up email changes verified via link
+  await user.reload();
+  const currentAuthEmail = user.email?.toLowerCase() || '';
+
+  const profileRef = doc(db, 'customers', uid);
+  const snap = await getDoc(profileRef);
+  if (!snap.exists()) {
+    throw new Error('Customer profile not found.');
+  }
+
+  const profileData = snap.data() as CustomerProfile;
+  if (currentAuthEmail && currentAuthEmail !== profileData.email?.toLowerCase()) {
+    await updateDoc(profileRef, cleanFirestoreObject({
+      email: currentAuthEmail,
+      updatedAt: new Date().toISOString()
+    }));
+    return {
+      synced: true,
+      email: currentAuthEmail,
+      isVerified: user.emailVerified
+    };
+  }
+
+  return {
+    synced: false,
+    email: profileData.email || currentAuthEmail,
+    isVerified: user.emailVerified
+  };
+}
+
+/**
+ * Uploads a customer profile picture to Firebase Storage and updates their Firestore profile.
+ * Path: customers/{uid}/avatar_{timestamp}.{ext}
+ */
+export async function uploadCustomerProfilePicture(
+  uid: string,
+  file: File,
+  previousStoragePath?: string | null
+): Promise<{ photoUrl: string; storagePath: string }> {
+  const user = auth.currentUser;
+  if (!user || user.uid !== uid) {
+    throw new Error('You must be signed in to upload a profile picture.');
+  }
+
+  // 1. Validate file format
+  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+  if (!allowedMimeTypes.includes(file.type.toLowerCase())) {
+    throw new Error('Unsupported image format. Please select a JPG, PNG, or WebP image.');
+  }
+
+  // 2. Validate file size (max 5MB)
+  const maxSizeBytes = 5 * 1024 * 1024;
+  if (file.size > maxSizeBytes) {
+    throw new Error('File size exceeds the 5MB limit. Please choose a smaller image.');
+  }
+
+  // 3. Determine file extension
+  let extension = 'jpg';
+  if (file.type.includes('png')) extension = 'png';
+  else if (file.type.includes('webp')) extension = 'webp';
+  else if (file.name.includes('.')) {
+    const extFromName = file.name.split('.').pop()?.toLowerCase();
+    if (extFromName && ['jpg', 'jpeg', 'png', 'webp'].includes(extFromName)) {
+      extension = extFromName;
+    }
+  }
+
+  const storagePath = `customers/${uid}/avatar_${Date.now()}.${extension}`;
+  const fileRef = ref(storage, storagePath);
+
+  try {
+    // 4. Upload to Firebase Storage
+    await uploadBytes(fileRef, file, {
+      contentType: file.type,
+      customMetadata: {
+        customerId: uid,
+        uploadedAt: new Date().toISOString()
+      }
+    });
+
+    // 5. Get Download URL
+    const downloadUrl = await getDownloadURL(fileRef);
+
+    // 6. Update Firestore customer profile
+    const profileRef = doc(db, 'customers', uid);
+    await updateDoc(profileRef, cleanFirestoreObject({
+      photoUrl: downloadUrl,
+      photoStoragePath: storagePath,
+      updatedAt: new Date().toISOString()
+    }));
+
+    // 7. Update Firebase Auth user photoURL
+    try {
+      await updateProfile(user, { photoURL: downloadUrl });
+    } catch (authProfErr) {
+      console.warn('Could not update Firebase Auth photoURL:', authProfErr);
+    }
+
+    // 8. Delete previous file if one existed
+    if (previousStoragePath && previousStoragePath !== storagePath) {
+      try {
+        const oldRef = ref(storage, previousStoragePath);
+        await deleteObject(oldRef);
+      } catch (delErr) {
+        console.warn('Old profile picture cleanup note:', delErr);
+      }
+    }
+
+    return { photoUrl: downloadUrl, storagePath };
+  } catch (err: any) {
+    console.error('Error uploading profile picture:', err);
+    throw new Error(err.message || 'Failed to upload profile picture. Please try again.');
+  }
+}
+
+/**
+ * Removes the customer's profile picture from Firebase Storage and clears their Firestore profile.
+ */
+export async function removeCustomerProfilePicture(
+  uid: string,
+  currentStoragePath?: string | null
+): Promise<void> {
+  const user = auth.currentUser;
+  if (!user || user.uid !== uid) {
+    throw new Error('You must be signed in to remove your profile picture.');
+  }
+
+  // 1. Delete from Firebase Storage if storage path exists
+  if (currentStoragePath) {
+    try {
+      const fileRef = ref(storage, currentStoragePath);
+      await deleteObject(fileRef);
+    } catch (err) {
+      console.warn('Could not remove file from storage (may already be deleted):', err);
+    }
+  }
+
+  // 2. Update Firestore customer profile
+  const profileRef = doc(db, 'customers', uid);
+  await updateDoc(profileRef, cleanFirestoreObject({
+    photoUrl: null,
+    photoStoragePath: null,
+    updatedAt: new Date().toISOString()
+  }));
+
+  // 3. Clear Firebase Auth user photoURL
+  try {
+    await updateProfile(user, { photoURL: '' });
+  } catch (authProfErr) {
+    console.warn('Could not clear Firebase Auth photoURL:', authProfErr);
+  }
 }
 
 /**
@@ -421,7 +737,18 @@ export async function linkGuestOrderToCustomer(
   }
 
   const orderRef = doc(db, 'orders', cleanId);
-  const snap = await getDoc(orderRef);
+  let snap;
+  try {
+    snap = await getDoc(orderRef);
+  } catch (err: any) {
+    if (err?.code === 'permission-denied' || err?.message?.includes('permission-denied') || err?.message?.includes('Missing or insufficient permissions')) {
+      throw new Error(
+        'For security, linking unassigned guest orders cannot be performed directly in browser mode. Please contact showroom support at +977-9852821213 with your order reference and mobile number to associate this order.'
+      );
+    }
+    throw err;
+  }
+
   if (!snap.exists()) {
     throw new Error(`Order "${cleanId}" was not found. Please double-check your order reference.`);
   }
@@ -445,10 +772,19 @@ export async function linkGuestOrderToCustomer(
   }
 
   const nowIso = new Date().toISOString();
-  await updateDoc(orderRef, {
-    customerId,
-    updatedAt: nowIso
-  });
+  try {
+    await updateDoc(orderRef, {
+      customerId,
+      updatedAt: nowIso
+    });
+  } catch (err: any) {
+    if (err?.code === 'permission-denied' || err?.message?.includes('permission-denied') || err?.message?.includes('Missing or insufficient permissions')) {
+      throw new Error(
+        'For store protection, claiming guest orders requires showroom assistance. Please call +977-9852821213 with reference ' + cleanId + '.'
+      );
+    }
+    throw err;
+  }
 
   return {
     ...orderData,

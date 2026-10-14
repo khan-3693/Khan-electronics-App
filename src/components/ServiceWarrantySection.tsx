@@ -74,7 +74,7 @@ export const ServiceWarrantySection: React.FC<ServiceWarrantySectionProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-12">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-12 space-y-12">
       {/* Top Banner highlighting Multi-Brand Service & Non-Khan purchase support */}
       <div className="relative rounded-3xl p-6 sm:p-10 bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/60 border border-emerald-200 shadow-sm overflow-hidden">
         <div className="max-w-3xl space-y-4 relative z-10">

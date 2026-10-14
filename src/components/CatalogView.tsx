@@ -119,7 +119,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8 animate-in fade-in duration-300">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-10 space-y-8 animate-in fade-in duration-300">
       {/* Top Filter and Search Bar */}
       <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
         {/* Category Pills */}

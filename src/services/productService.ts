@@ -13,7 +13,7 @@ import {
   Timestamp, 
   onSnapshot 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, adminDb, adminAuth, handleFirestoreError, OperationType } from './firebase';
 import { deleteProductAllImages } from './storageService';
 import { Product } from '../types';
 
@@ -366,10 +366,10 @@ export async function saveProductToFirestore(
       videos: Array.isArray(productData.videos) ? productData.videos : []
     };
 
-    await setDoc(doc(db, path, generatedId), docPayload, { merge: true });
+    await setDoc(doc(adminDb, path, generatedId), docPayload, { merge: true });
     return docPayload;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    handleFirestoreError(error, OperationType.WRITE, path, adminAuth);
     throw error;
   }
 }
@@ -380,14 +380,14 @@ export async function saveProductToFirestore(
 export async function deleteProductFromFirestore(productId: string, imageUrls?: string[]): Promise<void> {
   const path = 'products';
   try {
-    await deleteDoc(doc(db, path, productId));
+    await deleteDoc(doc(adminDb, path, productId));
 
     // Safely cleanup orphaned product images in Firebase Storage
     deleteProductAllImages(productId, imageUrls).catch((storageErr) => {
       console.warn(`Storage cleanup for product ${productId}:`, storageErr);
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${path}/${productId}`);
+    handleFirestoreError(error, OperationType.DELETE, `${path}/${productId}`, adminAuth);
     throw error;
   }
 }

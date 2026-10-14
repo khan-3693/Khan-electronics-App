@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   User, 
@@ -26,7 +26,10 @@ import {
   Check,
   Building,
   HelpCircle,
-  FileText
+  FileText,
+  Camera,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 import { 
   CustomerProfile, 
@@ -45,6 +48,12 @@ import {
   sendCustomerPasswordReset, 
   changeCustomerPassword, 
   updateCustomerProfile, 
+  changeCustomerEmail,
+  syncCustomerEmailWithAuth,
+  uploadCustomerProfilePicture,
+  removeCustomerProfilePicture,
+  isGoogleAuthUser,
+  isPasswordAuthUser,
   addSavedAddress, 
   updateSavedAddress, 
   deleteSavedAddress, 
@@ -63,7 +72,7 @@ import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 interface CustomerDashboardModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onOpenOrderTracking: (orderId?: string) => void;
+  onOpenOrderTracking: (orderId?: string, phone?: string) => void;
   onNavigateToCatalog?: () => void;
   onNavigateToService?: () => void;
   onNavigateToExchange?: () => void;
@@ -115,6 +124,27 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
   const [editPhone, setEditPhone] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Profile Picture form & upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isRemovingPhoto, setIsRemovingPhoto] = useState(false);
+  const [photoMsg, setPhotoMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Edit Email form & verification state
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [newEmailInput, setNewEmailInput] = useState('');
+  const [currentPasswordForEmail, setCurrentPasswordForEmail] = useState('');
+  const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
+  const [isSyncingEmail, setIsSyncingEmail] = useState(false);
+  const [emailMsg, setEmailMsg] = useState<{ 
+    type: 'success' | 'error' | 'info'; 
+    text: string; 
+    requiresVerification?: boolean; 
+    pendingEmail?: string 
+  } | null>(null);
 
   // Change Password form state
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -402,6 +432,199 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
     }
   };
 
+  // Handle Profile Photo selection & preview
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPhotoMsg(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate MIME format
+    const validMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!validMimes.includes(file.type.toLowerCase())) {
+      setPhotoMsg({
+        type: 'error',
+        text: 'Unsupported image format. Please select a JPG, PNG, or WebP photo.'
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setPhotoMsg({
+        type: 'error',
+        text: `File exceeds 5MB limit (${(file.size / (1024 * 1024)).toFixed(1)}MB). Please choose a smaller picture.`
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    if (previewImageUrl) {
+      URL.revokeObjectURL(previewImageUrl);
+    }
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedImageFile(file);
+    setPreviewImageUrl(previewUrl);
+  };
+
+  const handleCancelPreview = () => {
+    if (previewImageUrl) {
+      URL.revokeObjectURL(previewImageUrl);
+    }
+    setSelectedImageFile(null);
+    setPreviewImageUrl(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSavePhoto = async () => {
+    if (!currentUser || !selectedImageFile) return;
+    setIsUploadingPhoto(true);
+    setPhotoMsg(null);
+
+    try {
+      const result = await uploadCustomerProfilePicture(
+        currentUser.uid,
+        selectedImageFile,
+        customerProfile?.photoStoragePath
+      );
+
+      setCustomerProfile(prev => prev ? ({
+        ...prev,
+        photoUrl: result.photoUrl,
+        photoStoragePath: result.storagePath,
+        updatedAt: new Date().toISOString()
+      }) : null);
+
+      setPhotoMsg({
+        type: 'success',
+        text: 'Profile picture saved and updated successfully!'
+      });
+      handleCancelPreview();
+    } catch (err: any) {
+      setPhotoMsg({
+        type: 'error',
+        text: err.message || 'Could not upload photo. Please check your connection and try again.'
+      });
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    if (!currentUser) return;
+
+    setIsRemovingPhoto(true);
+    setPhotoMsg(null);
+
+    try {
+      await removeCustomerProfilePicture(currentUser.uid, customerProfile?.photoStoragePath);
+      setCustomerProfile(prev => prev ? ({
+        ...prev,
+        photoUrl: null,
+        photoStoragePath: null,
+        updatedAt: new Date().toISOString()
+      }) : null);
+
+      setPhotoMsg({
+        type: 'success',
+        text: 'Profile picture removed. Default avatar is now displayed.'
+      });
+      handleCancelPreview();
+    } catch (err: any) {
+      setPhotoMsg({
+        type: 'error',
+        text: err.message || 'Failed to remove picture.'
+      });
+    } finally {
+      setIsRemovingPhoto(false);
+    }
+  };
+
+  // Handle Safe Email Update
+  const handleChangeEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    setEmailMsg(null);
+    setIsSubmittingEmail(true);
+
+    try {
+      const res = await changeCustomerEmail({
+        newEmail: newEmailInput,
+        currentPassword: currentPasswordForEmail
+      });
+
+      if (res.requiresVerification) {
+        setEmailMsg({
+          type: 'info',
+          text: res.message,
+          requiresVerification: true,
+          pendingEmail: res.emailSentTo
+        });
+      } else {
+        // Immediate update
+        setCustomerProfile(prev => prev ? ({
+          ...prev,
+          email: res.emailSentTo,
+          updatedAt: new Date().toISOString()
+        }) : null);
+        setEmailMsg({
+          type: 'success',
+          text: res.message
+        });
+        setIsEditingEmail(false);
+        setNewEmailInput('');
+        setCurrentPasswordForEmail('');
+      }
+    } catch (err: any) {
+      setEmailMsg({
+        type: 'error',
+        text: err.message || 'Could not update email.'
+      });
+    } finally {
+      setIsSubmittingEmail(false);
+    }
+  };
+
+  // Sync verified email with Firebase Auth
+  const handleSyncVerifiedEmail = async () => {
+    if (!currentUser) return;
+    setIsSyncingEmail(true);
+    try {
+      const res = await syncCustomerEmailWithAuth(currentUser.uid);
+      if (res.synced) {
+        setCustomerProfile(prev => prev ? ({
+          ...prev,
+          email: res.email,
+          updatedAt: new Date().toISOString()
+        }) : null);
+        setEmailMsg({
+          type: 'success',
+          text: `Success! Your verified email has been updated to ${res.email}.`
+        });
+        setIsEditingEmail(false);
+        setNewEmailInput('');
+        setCurrentPasswordForEmail('');
+      } else {
+        setEmailMsg({
+          type: 'info',
+          text: `Verification is still pending. Please open the confirmation link in your email inbox (${newEmailInput || 'your new email'}), then click "Sync Verified Email" again.`,
+          requiresVerification: true,
+          pendingEmail: newEmailInput
+        });
+      }
+    } catch (err: any) {
+      setEmailMsg({
+        type: 'error',
+        text: err.message || 'Could not verify email status.'
+      });
+    } finally {
+      setIsSyncingEmail(false);
+    }
+  };
+
   // Saved Address Operations
   const handleOpenAddAddress = () => {
     setEditingAddressId(null);
@@ -534,14 +757,22 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 md:p-6 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 md:p-6 animate-modal-backdrop">
+      <div className="relative w-full max-w-4xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col animate-modal-content">
         {/* Modal Top Header */}
         <div className="p-4 sm:p-5 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-20">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500 flex items-center justify-center text-slate-950 font-extrabold shadow-xs">
-              <User className="w-5 h-5" />
-            </div>
+            {currentUser && (customerProfile?.photoUrl || currentUser.photoURL) ? (
+              <img
+                src={customerProfile?.photoUrl || currentUser.photoURL || ''}
+                alt={customerProfile?.fullName || 'Customer Profile'}
+                className="w-10 h-10 rounded-2xl object-cover ring-2 ring-amber-400 shadow-xs shrink-0"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-2xl bg-amber-500 flex items-center justify-center text-slate-950 font-extrabold shadow-xs shrink-0">
+                <User className="w-5 h-5" />
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-display font-bold text-slate-900">
@@ -970,7 +1201,7 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
                                 <button
                                   onClick={() => {
                                     onClose();
-                                    onOpenOrderTracking(order.orderId || order.id);
+                                    onOpenOrderTracking(order.orderId || order.id, order.phone || order.deliveryAddress?.phone);
                                   }}
                                   className="text-[11px] font-bold text-amber-700 hover:text-amber-800 hover:underline flex items-center gap-1"
                                 >
@@ -1040,7 +1271,7 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
               {/* TAB 2: PERSONAL PROFILE & SECURITY */}
               {activeTab === 'profile' && (
                 <div className="space-y-6 max-w-2xl">
-                  {/* Feedback Message */}
+                  {/* Feedback Message for Personal Info */}
                   {profileMsg && (
                     <div
                       className={`p-3.5 rounded-2xl text-xs flex items-center gap-2 ${
@@ -1049,12 +1280,174 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
                           : 'bg-red-50 text-red-800 border border-red-200'
                       }`}
                     >
-                      {profileMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-red-600" />}
+                      {profileMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />}
                       <span>{profileMsg.text}</span>
                     </div>
                   )}
 
-                  {/* Profile Info Card */}
+                  {/* ========================================================================= */}
+                  {/* SECTION 1: CUSTOMER PROFILE PICTURE                                       */}
+                  {/* ========================================================================= */}
+                  <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-5 shadow-xs">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                          <Camera className="w-4 h-4 text-amber-600" />
+                          <span>Customer Profile Picture</span>
+                        </h3>
+                        <p className="text-slate-500 text-[11px] mt-0.5">
+                          Personalize your Khan Electronics account. Supported formats: JPG, PNG, WebP (Max 5MB).
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Photo Feedback Message */}
+                    {photoMsg && (
+                      <div
+                        className={`p-3 rounded-2xl text-xs flex items-center gap-2 ${
+                          photoMsg.type === 'success'
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            : 'bg-red-50 text-red-800 border border-red-200'
+                        }`}
+                      >
+                        {photoMsg.type === 'success' ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                        )}
+                        <span>{photoMsg.text}</span>
+                      </div>
+                    )}
+
+                    {/* Hidden file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleImageSelect}
+                      className="hidden"
+                      id="customer-profile-photo-input"
+                    />
+
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+                      {/* Avatar container */}
+                      <div className="relative shrink-0">
+                        {previewImageUrl ? (
+                          <div className="relative group">
+                            <img
+                              src={previewImageUrl}
+                              alt="New Avatar Preview"
+                              className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl object-cover ring-4 ring-amber-400 shadow-md"
+                            />
+                            <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-xs whitespace-nowrap">
+                              Preview
+                            </span>
+                          </div>
+                        ) : customerProfile?.photoUrl ? (
+                          <div className="relative group">
+                            <img
+                              src={customerProfile.photoUrl}
+                              alt={customerProfile.fullName || 'Customer Profile'}
+                              className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl object-cover ring-2 ring-slate-200 shadow-md"
+                            />
+                            <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-1 shadow-xs" title="Profile picture active">
+                              <Check className="w-3 h-3" />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-amber-50 border-2 border-dashed border-amber-300 flex flex-col items-center justify-center text-amber-700 shadow-2xs">
+                            <User className="w-8 h-8 text-amber-600" />
+                            <span className="text-[10px] font-bold text-amber-800 mt-1">Default</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Photo Actions */}
+                      <div className="space-y-2.5 flex-1">
+                        {previewImageUrl ? (
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold text-slate-700">
+                              Ready to save your new photo?
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={handleSavePhoto}
+                                disabled={isUploadingPhoto}
+                                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs disabled:opacity-50"
+                              >
+                                {isUploadingPhoto ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Saving to Storage...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>Save Picture</span>
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleCancelPreview}
+                                disabled={isUploadingPhoto}
+                                className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors disabled:opacity-50"
+                              >
+                                Cancel Preview
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <p className="text-xs text-slate-600">
+                              {customerProfile?.photoUrl 
+                                ? 'Upload a replacement picture or remove your existing one.' 
+                                : 'No profile photo uploaded yet. Select an image from your device.'}
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                className="px-3.5 py-2 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 text-slate-800 hover:text-amber-900 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
+                              >
+                                <Upload className="w-3.5 h-3.5 text-amber-600" />
+                                <span>{customerProfile?.photoUrl ? 'Change Picture' : 'Upload Picture'}</span>
+                              </button>
+
+                              {customerProfile?.photoUrl && (
+                                <button
+                                  type="button"
+                                  onClick={handleRemovePhoto}
+                                  disabled={isRemovingPhoto}
+                                  className="px-3.5 py-2 rounded-xl border border-red-200 hover:bg-red-50 text-red-700 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                                >
+                                  {isRemovingPhoto ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span>Removing...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                                      <span>Remove</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        <p className="text-[11px] text-slate-400">
+                          Securely stored in Firebase Storage path: <code className="text-[10px] bg-slate-100 px-1 py-0.5 rounded text-slate-600 font-mono">customers/{currentUser?.uid}/...</code>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ========================================================================= */}
+                  {/* SECTION 2: CUSTOMER PERSONAL DETAILS                                      */}
+                  {/* ========================================================================= */}
                   <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-6 shadow-xs">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                       <div>
@@ -1071,10 +1464,10 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
                             setEditPhone(customerProfile?.phone || '');
                             setIsEditingProfile(true);
                           }}
-                          className="px-3 py-1.5 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 text-slate-700 hover:text-amber-900 font-bold flex items-center gap-1.5 transition-colors"
+                          className="px-3 py-1.5 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 text-slate-700 hover:text-amber-900 font-bold flex items-center gap-1.5 transition-colors text-xs"
                         >
                           <Edit2 className="w-3.5 h-3.5 text-amber-600" />
-                          <span>Edit Profile</span>
+                          <span>Edit Details</span>
                         </button>
                       )}
                     </div>
@@ -1092,17 +1485,19 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
                         </div>
 
                         <div className="p-3.5 bg-slate-50 rounded-2xl space-y-1">
-                          <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wider">Email Address</span>
-                          <span className="font-bold text-slate-900 text-sm">{customerProfile?.email || currentUser?.email}</span>
-                        </div>
-
-                        <div className="p-3.5 bg-slate-50 rounded-2xl space-y-1">
                           <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wider">Membership Tier</span>
                           <span className="font-bold text-amber-800 text-sm">{customerProfile?.memberTier || 'Regular Customer'}</span>
                         </div>
+
+                        <div className="p-3.5 bg-slate-50 rounded-2xl space-y-1">
+                          <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wider">Customer UID</span>
+                          <span className="font-mono text-slate-700 text-xs truncate block" title={currentUser?.uid}>
+                            {currentUser?.uid || 'N/A'}
+                          </span>
+                        </div>
                       </div>
                     ) : (
-                      <form onSubmit={handleSaveProfile} className="space-y-4">
+                      <form onSubmit={handleSaveProfile} className="space-y-4 text-xs">
                         <div className="space-y-1">
                           <label className="font-bold text-slate-700">Full Name *</label>
                           <input
@@ -1146,77 +1541,171 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
                     )}
                   </div>
 
-                  {/* Change Password Section */}
+                  {/* ========================================================================= */}
+                  {/* SECTION 3: EDIT EMAIL & AUTHENTICATION (FEATURE 1)                        */}
+                  {/* ========================================================================= */}
                   <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-xs">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                       <div>
-                        <h3 className="font-bold text-slate-900 text-sm">Account Security</h3>
-                        <p className="text-slate-500 text-[11px]">Update your customer portal password.</p>
+                        <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                          <Mail className="w-4 h-4 text-amber-600" />
+                          <span>Account Email Address</span>
+                        </h3>
+                        <p className="text-slate-500 text-[11px] mt-0.5">
+                          Primary login identifier synchronized with Firebase Authentication.
+                        </p>
                       </div>
 
-                      {!isChangingPassword && (
+                      {!isEditingEmail && !isGoogleAuthUser(currentUser) && (
                         <button
+                          type="button"
                           onClick={() => {
-                            setPasswordMsg(null);
-                            setIsChangingPassword(true);
+                            setEmailMsg(null);
+                            setNewEmailInput('');
+                            setCurrentPasswordForEmail('');
+                            setIsEditingEmail(true);
                           }}
-                          className="px-3 py-1.5 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 text-slate-700 hover:text-amber-900 font-bold flex items-center gap-1.5 transition-colors"
+                          className="px-3 py-1.5 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 text-slate-700 hover:text-amber-900 font-bold flex items-center gap-1.5 transition-colors text-xs"
                         >
-                          <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-                          <span>Change Password</span>
+                          <Edit2 className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Edit Email</span>
                         </button>
                       )}
                     </div>
 
-                    {passwordMsg && (
+                    {/* Email Feedback Message */}
+                    {emailMsg && (
                       <div
-                        className={`p-3 rounded-2xl text-xs flex items-center gap-2 ${
-                          passwordMsg.type === 'success'
+                        className={`p-3.5 rounded-2xl text-xs space-y-2 ${
+                          emailMsg.type === 'success'
                             ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            : emailMsg.type === 'info'
+                            ? 'bg-amber-50 text-amber-900 border border-amber-200'
                             : 'bg-red-50 text-red-800 border border-red-200'
                         }`}
                       >
-                        {passwordMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-red-600" />}
-                        <span>{passwordMsg.text}</span>
+                        <div className="flex items-start gap-2">
+                          {emailMsg.type === 'success' ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                          ) : emailMsg.type === 'info' ? (
+                            <Mail className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                          )}
+                          <span className="leading-relaxed">{emailMsg.text}</span>
+                        </div>
+
+                        {/* Action button if verification link was dispatched */}
+                        {emailMsg.requiresVerification && (
+                          <div className="pt-1 flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={handleSyncVerifiedEmail}
+                              disabled={isSyncingEmail}
+                              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-colors shadow-2xs disabled:opacity-50"
+                            >
+                              {isSyncingEmail ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Checking Firebase Auth...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Sync Verified Email</span>
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEmailMsg(null);
+                                setIsEditingEmail(false);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl text-slate-600 hover:text-slate-900 text-xs font-semibold hover:bg-slate-100"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {isChangingPassword && (
-                      <form onSubmit={handleChangePassword} className="space-y-3 pt-2">
+                    {/* View Mode */}
+                    {!isEditingEmail ? (
+                      <div className="space-y-3">
+                        <div className="p-3.5 bg-slate-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                          <div>
+                            <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wider">Active Email</span>
+                            <span className="font-bold text-slate-900 text-sm break-all">
+                              {customerProfile?.email || currentUser?.email || 'No email attached'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isGoogleAuthUser(currentUser) ? (
+                              <span className="px-2.5 py-1 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 font-bold text-[11px] flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                                Google Account
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-[11px] flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                                Email & Password Account
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Special Note for Google Provider */}
+                        {isGoogleAuthUser(currentUser) && (
+                          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-600 text-[11px] flex items-start gap-2">
+                            <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                            <p className="leading-relaxed">
+                              This account is authenticated through Google Sign-In. Per Firebase security standards, Google-linked email addresses cannot be modified here and must be managed via your Google Account settings.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Edit Email Form */
+                      <form onSubmit={handleChangeEmailSubmit} className="space-y-3 pt-1 text-xs">
+                        <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-2xl text-[11px] text-amber-900 flex items-start gap-2">
+                          <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                          <p className="leading-relaxed">
+                            For security, Firebase Authentication requires confirming your current password before updating your email. Once submitted, a verification confirmation link will be dispatched to your new address.
+                          </p>
+                        </div>
+
                         <div className="space-y-1">
-                          <label className="font-bold text-slate-700">Current Password *</label>
+                          <label className="font-bold text-slate-700">Current Email (Read Only)</label>
                           <input
-                            type="password"
+                            type="email"
+                            disabled
+                            value={customerProfile?.email || currentUser?.email || ''}
+                            className="w-full px-3.5 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-500 font-medium cursor-not-allowed"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="font-bold text-slate-700">New Email Address *</label>
+                          <input
+                            type="email"
                             required
-                            value={currentPassword}
-                            onChange={(e) => setCurrentPassword(e.target.value)}
-                            placeholder="••••••••"
+                            value={newEmailInput}
+                            onChange={(e) => setNewEmailInput(e.target.value)}
+                            placeholder="new.email@example.com"
                             className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-amber-500 font-medium"
                           />
                         </div>
 
                         <div className="space-y-1">
-                          <label className="font-bold text-slate-700">New Password (min 6 chars) *</label>
+                          <label className="font-bold text-slate-700">Current Password (Identity Verification) *</label>
                           <input
                             type="password"
                             required
-                            minLength={6}
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            placeholder="••••••••"
-                            className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-amber-500 font-medium"
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="font-bold text-slate-700">Confirm New Password *</label>
-                          <input
-                            type="password"
-                            required
-                            minLength={6}
-                            value={confirmNewPassword}
-                            onChange={(e) => setConfirmNewPassword(e.target.value)}
-                            placeholder="••••••••"
+                            value={currentPasswordForEmail}
+                            onChange={(e) => setCurrentPasswordForEmail(e.target.value)}
+                            placeholder="Enter your current password"
                             className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-amber-500 font-medium"
                           />
                         </div>
@@ -1224,15 +1713,28 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
                         <div className="flex items-center gap-2 pt-2">
                           <button
                             type="submit"
-                            disabled={passwordSaving}
+                            disabled={isSubmittingEmail}
                             className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
                           >
-                            {passwordSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                            <span>Update Password</span>
+                            {isSubmittingEmail ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Verifying with Firebase...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Send Verification & Update</span>
+                              </>
+                            )}
                           </button>
                           <button
                             type="button"
-                            onClick={() => setIsChangingPassword(false)}
+                            onClick={() => {
+                              setIsEditingEmail(false);
+                              setNewEmailInput('');
+                              setCurrentPasswordForEmail('');
+                            }}
                             className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50"
                           >
                             Cancel
@@ -1241,6 +1743,106 @@ export const CustomerDashboardModal: React.FC<CustomerDashboardModalProps> = ({
                       </form>
                     )}
                   </div>
+
+                  {/* ========================================================================= */}
+                  {/* SECTION 4: ACCOUNT SECURITY (CHANGE PASSWORD)                             */}
+                  {/* ========================================================================= */}
+                  {!isGoogleAuthUser(currentUser) && (
+                    <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-xs">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <div>
+                          <h3 className="font-bold text-slate-900 text-sm">Account Password</h3>
+                          <p className="text-slate-500 text-[11px]">Update your customer portal password.</p>
+                        </div>
+
+                        {!isChangingPassword && (
+                          <button
+                            onClick={() => {
+                              setPasswordMsg(null);
+                              setIsChangingPassword(true);
+                            }}
+                            className="px-3 py-1.5 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 text-slate-700 hover:text-amber-900 font-bold flex items-center gap-1.5 transition-colors text-xs"
+                          >
+                            <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Change Password</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {passwordMsg && (
+                        <div
+                          className={`p-3 rounded-2xl text-xs flex items-center gap-2 ${
+                            passwordMsg.type === 'success'
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              : 'bg-red-50 text-red-800 border border-red-200'
+                          }`}
+                        >
+                          {passwordMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-red-600" />}
+                          <span>{passwordMsg.text}</span>
+                        </div>
+                      )}
+
+                      {isChangingPassword && (
+                        <form onSubmit={handleChangePassword} className="space-y-3 pt-2 text-xs">
+                          <div className="space-y-1">
+                            <label className="font-bold text-slate-700">Current Password *</label>
+                            <input
+                              type="password"
+                              required
+                              value={currentPassword}
+                              onChange={(e) => setCurrentPassword(e.target.value)}
+                              placeholder="••••••••"
+                              className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-amber-500 font-medium"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="font-bold text-slate-700">New Password (min 6 chars) *</label>
+                            <input
+                              type="password"
+                              required
+                              minLength={6}
+                              value={newPassword}
+                              onChange={(e) => setNewPassword(e.target.value)}
+                              placeholder="••••••••"
+                              className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-amber-500 font-medium"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="font-bold text-slate-700">Confirm New Password *</label>
+                            <input
+                              type="password"
+                              required
+                              minLength={6}
+                              value={confirmNewPassword}
+                              onChange={(e) => setConfirmNewPassword(e.target.value)}
+                              placeholder="••••••••"
+                              className="w-full px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-amber-500 font-medium"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-2">
+                            <button
+                              type="submit"
+                              disabled={passwordSaving}
+                              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                            >
+                              {passwordSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                              <span>Update Password</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setIsChangingPassword(false)}
+                              className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

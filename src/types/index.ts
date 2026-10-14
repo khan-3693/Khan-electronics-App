@@ -250,6 +250,8 @@ export interface CustomerProfile {
   fullName: string;
   phone: string;
   email: string;
+  photoUrl?: string | null;
+  photoStoragePath?: string | null;
   savedAddresses: SavedAddress[];
   memberTier: 'Regular Customer' | 'Khan Gold Family' | 'Showroom VIP';
   createdAt: string;

@@ -10,7 +10,7 @@ import {
   onSnapshot, 
   Timestamp 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, adminDb, adminAuth, handleFirestoreError, OperationType } from './firebase';
 import { 
   Order, 
   OrderStatus, 
@@ -219,6 +219,20 @@ export async function createOrderInFirestore(params: {
     const orderRef = doc(db, 'orders', orderId);
     const sanitizedOrder = cleanFirestoreObject(newOrder);
     await setDoc(orderRef, sanitizedOrder);
+
+    // Save order in local device storage to preserve tracking for guest orders on the device that placed it
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const localKey = 'khan_electronics_guest_orders';
+        const existingRaw = localStorage.getItem(localKey);
+        const list: Order[] = existingRaw ? JSON.parse(existingRaw) : [];
+        list.unshift(newOrder);
+        localStorage.setItem(localKey, JSON.stringify(list.slice(0, 25)));
+      }
+    } catch {
+      // LocalStorage access non-blocking
+    }
+
     return newOrder;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `orders/${orderId}`);
@@ -230,6 +244,7 @@ export async function createOrderInFirestore(params: {
  * Customer order retrieval with phone verification
  * Protects customer privacy: only returns the order if the phone matches
  * Strips internal admin notes to protect confidential showroom information
+ * Always prioritizes live Firestore data so admin updates (Delivered, Paid) are immediately reflected.
  */
 export async function fetchCustomerOrderWithVerification(
   orderId: string, 
@@ -245,40 +260,153 @@ export async function fetchCustomerOrderWithVerification(
     throw new Error('Please enter the mobile number used when placing the order.');
   }
 
+  // 1. ALWAYS query Firestore FIRST for authoritative server data
   try {
     const orderRef = doc(db, 'orders', cleanId);
     const snap = await getDoc(orderRef);
 
-    if (!snap.exists()) {
+    if (snap.exists()) {
+      const orderData = snap.data() as Order;
+      const orderPhone = normalizePhoneNumber(orderData.phone || orderData.deliveryAddress?.phone || '');
+
+      // Verify phone matches (allow last 7 to 10 digits match to handle regional dialing prefixes)
+      const matchesPhone = 
+        orderPhone === cleanEnteredPhone ||
+        (orderPhone.length >= 7 && cleanEnteredPhone.endsWith(orderPhone.slice(-7))) ||
+        (cleanEnteredPhone.length >= 7 && orderPhone.endsWith(cleanEnteredPhone.slice(-7)));
+
+      if (!matchesPhone) {
+        throw new Error('Mobile number does not match this order reference. Please check your 10-digit mobile number.');
+      }
+
+      // Sanitize: Strip internal admin notes before returning to customer
+      const sanitizedOrder: Order = {
+        ...orderData,
+        adminNotes: undefined // Never exposed to customers
+      };
+
+      // Synchronize local cache with latest authoritative server record so stale cache never lingers
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const localKey = 'khan_electronics_guest_orders';
+          const existingRaw = localStorage.getItem(localKey);
+          const list: Order[] = existingRaw ? JSON.parse(existingRaw) : [];
+          const idx = list.findIndex(o => (o.orderId && o.orderId.toUpperCase() === cleanId.toUpperCase()) || (o.id && o.id.toUpperCase() === cleanId.toUpperCase()));
+          if (idx !== -1) {
+            list[idx] = { ...list[idx], ...sanitizedOrder };
+          } else {
+            list.unshift(sanitizedOrder);
+          }
+          localStorage.setItem(localKey, JSON.stringify(list.slice(0, 25)));
+        }
+      } catch {}
+
+      return sanitizedOrder;
+    } else {
       throw new Error(`Order reference "${cleanId}" was not found in our database. Please verify your reference number.`);
     }
-
-    const orderData = snap.data() as Order;
-    const orderPhone = normalizePhoneNumber(orderData.phone || orderData.deliveryAddress?.phone || '');
-
-    // Verify phone matches (allow last 7 to 10 digits match to handle regional dialing prefixes)
-    const matchesPhone = 
-      orderPhone === cleanEnteredPhone ||
-      (orderPhone.length >= 7 && cleanEnteredPhone.endsWith(orderPhone.slice(-7))) ||
-      (cleanEnteredPhone.length >= 7 && orderPhone.endsWith(cleanEnteredPhone.slice(-7)));
-
-    if (!matchesPhone) {
-      throw new Error('Mobile number does not match this order reference. Please check your 10-digit mobile number.');
+  } catch (firestoreErr: any) {
+    // If phone mismatch was determined or order is confirmed absent, propagate that error directly
+    if (firestoreErr instanceof Error && firestoreErr.message.includes('Mobile number does not match')) {
+      throw firestoreErr;
+    }
+    if (firestoreErr instanceof Error && firestoreErr.message.includes('was not found in our database')) {
+      throw firestoreErr;
     }
 
-    // Sanitize: Strip internal admin notes before returning to customer
-    const sanitizedOrder: Order = {
-      ...orderData,
-      adminNotes: undefined // Never exposed to customers
-    };
+    // 2. Fallback to same-device local storage ONLY if direct server query was blocked (e.g. offline or unauthenticated guest)
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const localKey = 'khan_electronics_guest_orders';
+        const existingRaw = localStorage.getItem(localKey);
+        if (existingRaw) {
+          const list: Order[] = JSON.parse(existingRaw);
+          const match = list.find(o => (o.orderId && o.orderId.toUpperCase() === cleanId.toUpperCase()) || (o.id && o.id.toUpperCase() === cleanId.toUpperCase()));
+          if (match) {
+            const matchPhone = normalizePhoneNumber(match.phone || match.deliveryAddress?.phone || '');
+            const matchesPhone = 
+              matchPhone === cleanEnteredPhone ||
+              (matchPhone.length >= 7 && cleanEnteredPhone.endsWith(matchPhone.slice(-7))) ||
+              (cleanEnteredPhone.length >= 7 && matchPhone.endsWith(cleanEnteredPhone.slice(-7)));
 
-    return sanitizedOrder;
+            if (!matchesPhone) {
+              throw new Error('Mobile number does not match this order reference. Please check your 10-digit mobile number.');
+            }
+
+            return {
+              ...match,
+              adminNotes: undefined
+            };
+          }
+        }
+      }
+    } catch (localErr) {
+      if (localErr instanceof Error && localErr.message.includes('Mobile number does not match')) {
+        throw localErr;
+      }
+    }
+
+    if (firestoreErr instanceof Error && !firestoreErr.message.includes('permission-denied') && !firestoreErr.message.includes('Missing or insufficient permissions')) {
+      throw firestoreErr;
+    }
+
+    // Access denied by Firestore privacy rules and no local copy found
+    throw new Error(
+      'To protect customer privacy, tracking cross-device orders requires signing in to your Khan Electronics customer account. If you placed this order as a guest on another device, please sign in or contact our Rajbiraj showroom at +977-9852821213 with reference ' + cleanId + '.'
+    );
+  }
+}
+
+/**
+ * Real-time listener for a single customer order.
+ * Ensures Live Track Order immediately reflects admin updates (Delivered, Paid) in real time.
+ */
+export function subscribeToOrder(
+  orderId: string,
+  onOrderUpdated: (order: Order) => void,
+  onError?: (err: Error) => void
+): () => void {
+  const cleanId = orderId.trim();
+  if (!cleanId) return () => {};
+
+  try {
+    const orderRef = doc(db, 'orders', cleanId);
+    return onSnapshot(
+      orderRef,
+      (docSnap) => {
+        if (!docSnap.exists()) return;
+
+        const orderData = docSnap.data() as Order;
+        const sanitizedOrder: Order = {
+          ...orderData,
+          adminNotes: undefined // Strip internal admin notes
+        };
+
+        // Synchronize local device storage
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            const localKey = 'khan_electronics_guest_orders';
+            const existingRaw = localStorage.getItem(localKey);
+            const list: Order[] = existingRaw ? JSON.parse(existingRaw) : [];
+            const idx = list.findIndex(o => (o.orderId && o.orderId.toUpperCase() === cleanId.toUpperCase()) || (o.id && o.id.toUpperCase() === cleanId.toUpperCase()));
+            if (idx !== -1) {
+              list[idx] = { ...list[idx], ...sanitizedOrder };
+            } else {
+              list.unshift(sanitizedOrder);
+            }
+            localStorage.setItem(localKey, JSON.stringify(list.slice(0, 25)));
+          }
+        } catch {}
+
+        onOrderUpdated(sanitizedOrder);
+      },
+      (error) => {
+        if (onError) onError(error);
+      }
+    );
   } catch (err) {
-    if (err instanceof Error) {
-      throw err;
-    }
-    handleFirestoreError(err, OperationType.GET, `orders/${cleanId}`);
-    throw err;
+    if (onError) onError(err instanceof Error ? err : new Error(String(err)));
+    return () => {};
   }
 }
 
@@ -290,7 +418,7 @@ export function subscribeToOrders(
   onError?: (err: Error) => void
 ): () => void {
   try {
-    const ordersCol = collection(db, 'orders');
+    const ordersCol = collection(adminDb, 'orders');
     const q = query(ordersCol, orderBy('createdAt', 'desc'));
 
     return onSnapshot(
@@ -321,7 +449,7 @@ export function subscribeToOrders(
  */
 export async function fetchAllOrdersForAdmin(): Promise<Order[]> {
   try {
-    const ordersCol = collection(db, 'orders');
+    const ordersCol = collection(adminDb, 'orders');
     const q = query(ordersCol, orderBy('createdAt', 'desc'));
     const snapshot = await getDocs(q);
 
@@ -334,7 +462,7 @@ export async function fetchAllOrdersForAdmin(): Promise<Order[]> {
     });
     return orders;
   } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'orders');
+    handleFirestoreError(err, OperationType.LIST, 'orders', adminAuth);
     throw err;
   }
 }
@@ -347,7 +475,7 @@ export async function updateOrderStatusByAdmin(
   newStatus: OrderStatus
 ): Promise<void> {
   try {
-    const orderRef = doc(db, 'orders', orderId);
+    const orderRef = doc(adminDb, 'orders', orderId);
     const nowIso = new Date().toISOString();
 
     await updateDoc(orderRef, {
@@ -355,8 +483,26 @@ export async function updateOrderStatusByAdmin(
       status: newStatus,
       updatedAt: nowIso
     });
+
+    // Synchronize local storage cache so any open guest view on this device immediately reflects the status change
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const localKey = 'khan_electronics_guest_orders';
+        const existingRaw = localStorage.getItem(localKey);
+        if (existingRaw) {
+          const list: Order[] = JSON.parse(existingRaw);
+          const idx = list.findIndex(o => (o.orderId && o.orderId.toUpperCase() === orderId.toUpperCase()) || (o.id && o.id.toUpperCase() === orderId.toUpperCase()));
+          if (idx !== -1) {
+            list[idx].orderStatus = newStatus;
+            list[idx].status = newStatus;
+            list[idx].updatedAt = nowIso;
+            localStorage.setItem(localKey, JSON.stringify(list));
+          }
+        }
+      }
+    } catch {}
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`, adminAuth);
     throw err;
   }
 }
@@ -369,15 +515,32 @@ export async function updateOrderPaymentStatusByAdmin(
   newPaymentStatus: OrderPaymentStatus
 ): Promise<void> {
   try {
-    const orderRef = doc(db, 'orders', orderId);
+    const orderRef = doc(adminDb, 'orders', orderId);
     const nowIso = new Date().toISOString();
 
     await updateDoc(orderRef, {
       paymentStatus: newPaymentStatus,
       updatedAt: nowIso
     });
+
+    // Synchronize local storage cache
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const localKey = 'khan_electronics_guest_orders';
+        const existingRaw = localStorage.getItem(localKey);
+        if (existingRaw) {
+          const list: Order[] = JSON.parse(existingRaw);
+          const idx = list.findIndex(o => (o.orderId && o.orderId.toUpperCase() === orderId.toUpperCase()) || (o.id && o.id.toUpperCase() === orderId.toUpperCase()));
+          if (idx !== -1) {
+            list[idx].paymentStatus = newPaymentStatus;
+            list[idx].updatedAt = nowIso;
+            localStorage.setItem(localKey, JSON.stringify(list));
+          }
+        }
+      }
+    } catch {}
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`, adminAuth);
     throw err;
   }
 }
@@ -392,7 +555,7 @@ export async function updateOrderDeliveryByAdmin(
   currentSubtotal: number
 ): Promise<void> {
   try {
-    const orderRef = doc(db, 'orders', orderId);
+    const orderRef = doc(adminDb, 'orders', orderId);
     const nowIso = new Date().toISOString();
     const updatedTotal = currentSubtotal + (deliveryCharge || 0);
 
@@ -404,7 +567,7 @@ export async function updateOrderDeliveryByAdmin(
       updatedAt: nowIso
     }));
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`, adminAuth);
     throw err;
   }
 }
@@ -417,7 +580,7 @@ export async function updateOrderAdminNotesByAdmin(
   adminNotes: string
 ): Promise<void> {
   try {
-    const orderRef = doc(db, 'orders', orderId);
+    const orderRef = doc(adminDb, 'orders', orderId);
     const nowIso = new Date().toISOString();
 
     await updateDoc(orderRef, cleanFirestoreObject({
@@ -425,7 +588,7 @@ export async function updateOrderAdminNotesByAdmin(
       updatedAt: nowIso
     }));
   } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`);
+    handleFirestoreError(err, OperationType.UPDATE, `orders/${orderId}`, adminAuth);
     throw err;
   }
 }

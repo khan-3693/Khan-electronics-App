@@ -10,7 +10,7 @@ export const ShopByBrandSection: React.FC<ShopByBrandSectionProps> = ({
   onSelectBrand
 }) => {
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 py-12 space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-amber-700">

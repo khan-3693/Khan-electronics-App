@@ -24,6 +24,19 @@ service firebase.storage {
       allow delete: if isAdmin();
     }
 
+    // Customer profile pictures stored at /customers/{userId}/{fileName}
+    match /customers/{userId}/{fileName} {
+      // Customer can read their own profile picture; authorized admin can also read
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Customer can upload or replace only their own profile picture (max 5MB, valid image format)
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024 // 5MB maximum
+        && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
+      // Customer can remove only their own profile picture
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
     // Default deny all other paths
     match /{allPaths=**} {
       allow read, write: if false;

@@ -35,8 +35,8 @@ import {
 import { getOrCreateCustomerProfile } from './services/customerAuthService';
 import { cleanFirestoreObject } from './services/orderService';
 import { isProductFinanceEligible } from './services/financeService';
-import { doc, setDoc } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from './services/firebase';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { db, customerAuth as firebaseCustomerAuth, adminAuth as firebaseAdminAuth, handleFirestoreError, OperationType } from './services/firebase';
 
 import { KHAN_PRODUCTS } from './data/productsData';
 import { 
@@ -80,11 +80,11 @@ export default function App() {
   const [activeView, setActiveView] = useState<'home' | 'catalog' | 'exchange' | 'finance' | 'service' | 'support' | 'dashboard' | 'admin' | 'admin-login'>(() => {
     if (typeof window !== 'undefined') {
       const path = window.location.pathname;
-      const hash = window.location.hash;
-      if (path === '/admin/login' || hash === '#admin-login') {
+      const hash = window.location.hash.toLowerCase();
+      if (path === '/admin/login' || hash === '#admin-login' || hash === '#/admin/login' || hash === '#admin/login') {
         return 'admin-login';
       }
-      if (path === '/admin' || path.startsWith('/admin') || hash === '#admin') {
+      if (path === '/admin' || path.startsWith('/admin') || hash === '#admin' || hash === '#/admin') {
         return 'admin';
       }
     }
@@ -119,14 +119,14 @@ export default function App() {
     loading: true
   });
 
+  // 1. Isolated Admin Authentication Listener (adminAuth)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        // 1. Check Admin Permissions
+    const unsubAdmin = onAuthStateChanged(firebaseAdminAuth, async (adminUser) => {
+      if (adminUser) {
         try {
-          const authResult = await verifyAndEnsureAdmin(firebaseUser);
+          const authResult = await verifyAndEnsureAdmin(adminUser);
           setAdminAuth({
-            user: firebaseUser,
+            user: adminUser,
             isAuthorized: authResult.isAuthorized,
             adminDoc: authResult.adminDoc,
             loading: false,
@@ -134,28 +134,11 @@ export default function App() {
           });
         } catch (err) {
           setAdminAuth({
-            user: firebaseUser,
+            user: adminUser,
             isAuthorized: false,
             adminDoc: null,
             loading: false,
             error: 'Failed to verify admin status'
-          });
-        }
-
-        // 2. Load Customer Account Profile
-        try {
-          const profile = await getOrCreateCustomerProfile(firebaseUser);
-          setCustomerAuth({
-            user: firebaseUser,
-            profile,
-            loading: false
-          });
-        } catch (err) {
-          console.warn('Customer profile load note:', err);
-          setCustomerAuth({
-            user: firebaseUser,
-            profile: null,
-            loading: false
           });
         }
       } else {
@@ -165,6 +148,51 @@ export default function App() {
           adminDoc: null,
           loading: false
         });
+      }
+    });
+
+    return () => unsubAdmin();
+  }, []);
+
+  // 2. Isolated Customer Authentication Listener (customerAuth)
+  useEffect(() => {
+    let unsubProfileDoc: (() => void) | null = null;
+
+    const unsubCustomer = onAuthStateChanged(firebaseCustomerAuth, async (custUser) => {
+      if (unsubProfileDoc) {
+        unsubProfileDoc();
+        unsubProfileDoc = null;
+      }
+
+      if (custUser) {
+        try {
+          const profile = await getOrCreateCustomerProfile(custUser);
+          setCustomerAuth({
+            user: custUser,
+            profile,
+            loading: false
+          });
+
+          // Attach real-time listener to customer profile document in Firestore
+          unsubProfileDoc = onSnapshot(doc(db, 'customers', custUser.uid), (docSnap) => {
+            if (docSnap.exists()) {
+              setCustomerAuth(prev => ({
+                ...prev,
+                profile: docSnap.data() as CustomerProfile
+              }));
+            }
+          }, (err) => {
+            console.warn('Customer profile snapshot warning:', err);
+          });
+        } catch (err) {
+          console.warn('Customer profile load note:', err);
+          setCustomerAuth({
+            user: custUser,
+            profile: null,
+            loading: false
+          });
+        }
+      } else {
         setCustomerAuth({
           user: null,
           profile: null,
@@ -173,7 +201,12 @@ export default function App() {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubCustomer();
+      if (unsubProfileDoc) {
+        unsubProfileDoc();
+      }
+    };
   }, []);
 
   // Live Products State for Customer Storefront (synced with Firestore)
@@ -248,13 +281,15 @@ export default function App() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isOrderTrackingOpen, setIsOrderTrackingOpen] = useState(false);
   const [trackingOrderId, setTrackingOrderId] = useState<string>('');
+  const [trackingPhone, setTrackingPhone] = useState<string>('');
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
   const [aiProductContext, setAiProductContext] = useState<Product | null>(null);
 
-  const handleOpenOrderTracking = (orderId?: string) => {
+  const handleOpenOrderTracking = (orderId?: string, phone?: string) => {
     setTrackingOrderId(orderId || '');
+    setTrackingPhone(phone || '');
     setIsOrderTrackingOpen(true);
   };
 
@@ -365,22 +400,47 @@ export default function App() {
     handleNavigateView('admin-login');
   };
 
-  // Popstate history listener for direct URL /admin, /admin/login, or browser back/forward buttons
+  // Popstate & hashchange history listener for direct URL /admin, /admin/login, or browser back/forward buttons
   useEffect(() => {
-    const handlePopState = () => {
+    const handleLocationChange = () => {
       const path = window.location.pathname;
-      const hash = window.location.hash;
-      if (path === '/admin/login' || hash === '#admin-login') {
+      const hash = window.location.hash.toLowerCase();
+      if (path === '/admin/login' || hash === '#admin-login' || hash === '#/admin/login' || hash === '#admin/login') {
         setActiveView('admin-login');
-      } else if (path === '/admin' || path.startsWith('/admin') || hash === '#admin') {
+      } else if (path === '/admin' || path.startsWith('/admin') || hash === '#admin' || hash === '#/admin') {
         setActiveView('admin');
       } else if (activeView === 'admin' || activeView === 'admin-login') {
         setActiveView('home');
       }
     };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
   }, [activeView]);
+
+  // Internal navigation via the app's global search bar (typing /admin/login or /admin routes directly to admin login)
+  useEffect(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q === '/admin/login' || q === '/admin' || q === '#admin-login' || q === '#/admin/login' || q === '#admin/login') {
+      setSearchQuery('');
+      handleNavigateView('admin-login');
+    }
+  }, [searchQuery]);
+
+  // Internal keyboard shortcut (Alt+A or Ctrl+Shift+A) to open admin login
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') || (e.altKey && e.key.toLowerCase() === 'a')) {
+        e.preventDefault();
+        handleNavigateView('admin-login');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Wishlist state
   const [wishlistProductIds, setWishlistProductIds] = useState<string[]>(() => {
@@ -603,7 +663,7 @@ export default function App() {
   const cartTotalCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
 
   return (
-    <div className="min-h-screen bg-white text-slate-800 flex flex-col selection:bg-amber-100 selection:text-amber-900 pb-16 lg:pb-0">
+    <div className="min-h-screen bg-white text-slate-800 flex flex-col selection:bg-amber-100 selection:text-amber-900 pb-16 lg:pb-0 overflow-x-hidden w-full">
       {/* Sticky Navigation */}
       <Navbar
         activeView={activeView}
@@ -623,10 +683,14 @@ export default function App() {
         firestoreProductCount={firestoreStatus.productCount}
         onOpenFirestoreStatus={() => setIsFirestoreModalOpen(true)}
         onOpenOrderTracking={() => handleOpenOrderTracking()}
-        onOpenAdmin={() => handleNavigateView('admin')}
         customerUser={customerAuth.user}
         customerProfile={customerAuth.profile}
         isCustomerAuthLoading={customerAuth.loading}
+        products={customerProducts}
+        onSelectProduct={(product) => {
+          setSelectedProductForDetail(product);
+          handleNavigateView('catalog');
+        }}
       />
 
       {/* Main View Display */}
@@ -651,7 +715,7 @@ export default function App() {
             />
 
             {/* Featured Best Sellers Grid */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+            <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-slate-200 pb-4">
                 <div>
                   <span className="text-xs font-bold uppercase tracking-wider text-amber-700">
@@ -695,7 +759,7 @@ export default function App() {
             </div>
 
             {/* Prominent Samsung Exchange Banner */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
               <div className="rounded-3xl p-6 sm:p-10 bg-gradient-to-r from-blue-50/90 via-sky-50 to-indigo-50/70 border border-blue-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-8">
                 <div className="space-y-3 max-w-xl">
                   <span className="text-xs bg-blue-100 text-blue-800 px-3 py-1 rounded-full border border-blue-300 font-bold uppercase tracking-wider">
@@ -731,7 +795,7 @@ export default function App() {
             />
 
             {/* Multi-Brand Service & Warranty Highlight Banner */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12">
               <div className="rounded-3xl p-6 sm:p-8 bg-gradient-to-r from-emerald-50/80 via-white to-teal-50/60 border border-emerald-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
                 <div className="space-y-2 max-w-xl">
                   <span className="text-xs bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full border border-emerald-300 font-bold uppercase tracking-wider">
@@ -975,6 +1039,8 @@ export default function App() {
           isOpen={isOrderTrackingOpen}
           onClose={() => setIsOrderTrackingOpen(false)}
           initialOrderId={trackingOrderId}
+          initialPhone={trackingPhone}
+          customerProfile={customerAuth.profile}
         />
       )}
 
@@ -1045,12 +1111,21 @@ export default function App() {
       />
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto space-y-8">
+      <footer className="border-t border-slate-200 bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 xl:px-12 text-xs text-slate-500">
+        <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto space-y-8">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div className="space-y-3">
               <KhanLogo variant="footer" showSubtitle={false} />
-              <p className="text-slate-600 text-xs leading-relaxed">
+              <p 
+                className="text-slate-600 text-xs leading-relaxed pt-[1px] pb-[2px] mx-0 -mt-[18px]"
+                style={{
+                  paddingTop: '1px',
+                  paddingBottom: '2px',
+                  marginLeft: '0px',
+                  marginRight: '0px',
+                  marginTop: '-18px'
+                }}
+              >
                 New Khan Automobiles & Electronics &bull; Rajbiraj, Saptari, Nepal. Authorized multi-brand retail & service center.
               </p>
               <div className="text-slate-700 font-medium">
@@ -1095,14 +1170,6 @@ export default function App() {
               &copy; {new Date().getFullYear()} New Khan Automobiles & Electronics. All rights reserved. Rajbiraj, Saptari, Nepal.
             </div>
             <div className="flex items-center gap-3 flex-wrap text-slate-500">
-              <button 
-                onClick={() => handleNavigateView('admin')}
-                className="hover:text-amber-800 transition-colors flex items-center gap-1 text-[11px] font-bold text-slate-900 bg-amber-100 hover:bg-amber-200 px-2.5 py-0.5 rounded-full border border-amber-300 cursor-pointer"
-                title="Open Khan Electronics Store Admin Dashboard (/admin)"
-              >
-                <span>Store Admin (/admin)</span>
-              </button>
-              <span>&bull;</span>
               <button 
                 onClick={() => setIsFirestoreModalOpen(true)}
                 className="hover:text-emerald-700 transition-colors flex items-center gap-1 text-[11px] font-medium text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 cursor-pointer"

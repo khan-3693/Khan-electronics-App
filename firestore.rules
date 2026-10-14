@@ -12,19 +12,25 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'nkae.rjb@gmail.com' ||
-        (
-          exists(/databases/$(database)/documents/adminUsers/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.role == 'admin' &&
-          get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.active == true
-        )
+        exists(/databases/$(database)/documents/adminUsers/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.role == 'admin' &&
+        get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.active == true
       );
     }
 
     // Admin Users Collection
     match /adminUsers/{userId} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow create, update, delete: if isAdmin();
+      // Allows designated store admin to bootstrap their own admin record if not yet created,
+      // and active administrators to provision new admin users.
+      allow create: if (
+        isSignedIn() &&
+        request.auth.uid == userId &&
+        request.auth.token.email.lower() == 'nkae.rjb@gmail.com' &&
+        request.resource.data.role == 'admin' &&
+        request.resource.data.active == true
+      ) || isAdmin();
+      allow update, delete: if isAdmin();
     }
 
     // Customers Collection (Authenticated Customer Profiles)
@@ -50,8 +56,8 @@ service cloud.firestore {
     match /financeEnquiries/{enquiryId} {
       // Browsing/listing all records is restricted to admins or customer's own enquiries
       allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
-      // Single enquiry lookup allowed by ID or admin or owning customer
-      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(enquiryId);
+      // Single enquiry lookup restricted to admins or owning customer
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
       // Public customer can submit an enquiry for eligible appliances (>= 30,000 NPR)
       allow create: if isValidId(enquiryId)
         && request.resource.data.enquiryId == enquiryId
@@ -71,8 +77,8 @@ service cloud.firestore {
     match /orders/{orderId} {
       // Administrators can list all orders; signed-in customers can query their own orders
       allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
-      // Single order lookup allowed for administrators, owning customer, or by specific order reference
-      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(orderId);
+      // Single order lookup restricted to administrators or owning customer
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
       // Public customer order creation with strict validation
       allow create: if isValidId(orderId)
         && (request.resource.data.orderId == orderId || request.resource.data.id == orderId)
@@ -92,27 +98,21 @@ service cloud.firestore {
         && request.resource.data.paymentStatus == 'Unpaid'
         && request.resource.data.paymentMethod in ['Cash on Delivery', 'Pay at Store'];
       // Only authenticated and authorized active administrators can update status, payment or delete
-      // Authenticated customers can safely link an unassigned guest order to their own UID
-      allow update: if isAdmin() || (
-        isSignedIn() &&
-        (resource.data.customerId == null || resource.data.customerId == '') &&
-        request.resource.data.customerId == request.auth.uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['customerId', 'updatedAt'])
-      );
-      allow delete: if isAdmin();
+      // Arbitrary signed-in users cannot claim unassigned guest orders directly
+      allow update, delete: if isAdmin();
     }
 
     // Registered Appliance Warranties Collection
     match /warranties/{warrantyId} {
       allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
-      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(warrantyId);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
       allow update, delete: if isAdmin();
     }
 
     match /serviceTickets/{ticketId} {
       allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
-      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(ticketId);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
       allow create: if isValidId(ticketId)
         && request.resource.data.id is string
         && request.resource.data.phone is string;
@@ -121,7 +121,7 @@ service cloud.firestore {
 
     match /exchangeRequests/{requestId} {
       allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
-      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(requestId);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
       allow create: if isValidId(requestId)
         && request.resource.data.id is string
         && request.resource.data.phone is string;
@@ -130,7 +130,7 @@ service cloud.firestore {
 
     match /financeApplications/{applicationId} {
       allow list: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
-      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid) || isValidId(applicationId);
+      allow get: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
       allow create: if isValidId(applicationId)
         && request.resource.data.id is string
         && request.resource.data.citizenshipNo is string;

@@ -315,7 +315,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
       <div className="absolute top-20 right-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
 
       {/* Main Hero Slider Container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-12 relative z-10">
+      <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 pt-6 pb-12 relative z-10">
 
         {/* Top Slide Quick Selector Tabs */}
         <div className="flex items-center justify-between pb-6 gap-2 overflow-x-auto no-scrollbar border-b border-slate-100">

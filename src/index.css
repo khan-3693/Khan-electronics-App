@@ -73,3 +73,32 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Smooth modal fade-in and slide-up entrance animations */
+@keyframes modalBackdropFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modalFadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-modal-backdrop {
+  animation: modalBackdropFade 0.2s ease-out forwards;
+}
+
+.animate-modal-content {
+  animation: modalFadeSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
