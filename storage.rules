@@ -8,7 +8,11 @@ service firebase.storage {
 
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'nkae.rjb@gmail.com'
+        // Custom token claims (standard production pattern for role-based storage access)
+        ('admin' in request.auth.token && request.auth.token.admin == true) ||
+        ('role' in request.auth.token && request.auth.token.role == 'admin') ||
+        // Designated store administrator email (case-insensitive normalization)
+        ('email' in request.auth.token && request.auth.token.email.lower() == 'nkae.rjb@gmail.com')
       );
     }
 
@@ -26,15 +30,15 @@ service firebase.storage {
 
     // Customer profile pictures stored at /customers/{userId}/{fileName}
     match /customers/{userId}/{fileName} {
-      // Customer can read their own profile picture; authorized admin can also read
+      // Customer can read their own profile picture; authorized admin can also view
       allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       // Customer can upload or replace only their own profile picture (max 5MB, valid image format)
       allow write: if isSignedIn()
         && request.auth.uid == userId
         && request.resource.size < 5 * 1024 * 1024 // 5MB maximum
         && request.resource.contentType.matches('image/(jpeg|png|webp|jpg)');
-      // Customer can remove only their own profile picture
-      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Customer can remove only their own profile picture (admins cannot unilaterally delete customer photos)
+      allow delete: if isSignedIn() && request.auth.uid == userId;
     }
 
     // Default deny all other paths
